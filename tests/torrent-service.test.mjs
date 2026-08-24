@@ -525,8 +525,12 @@ test("un échec Defender après vérification maintient l'arrêt et la quarantai
   await assert.rejects(harness.service.start(1), /partage reste bloqué/u);
 });
 
-test("une analyse propre reprend un torrent qui partageait en mode priorité", { skip: process.platform !== "win32", timeout: 120_000 }, async (context) => {
-  const harness = await temporaryHarness(context, { torrents: [rawTorrent({ percent_done: 1, status: 6, files: [], file_stats: [] })] });
+test("une analyse propre reprend un torrent qui partageait en mode priorité", async (context) => {
+  const harness = await temporaryHarness(context, {
+    torrents: [rawTorrent({ percent_done: 1, status: 6, files: [], file_stats: [] })],
+    defenderHealthCheck: healthyDefender,
+    scanFile: cleanFileScan,
+  });
   const result = await harness.service.scan(1);
   assert.equal(result.clean, true);
   assert.equal(harness.calls.some(({ method }) => method === "torrent_stop"), true);
@@ -883,7 +887,7 @@ test("idleMinutes bloque la maintenance automatique mais une action share-all ex
   assert.equal(harness.state.torrents[0].status, 6);
 });
 
-test("un échec d'analyse persiste la quarantaine entre instances, puis une analyse propre la lève", { skip: process.platform !== "win32", timeout: 120_000 }, async (context) => {
+test("un échec d'analyse persiste la quarantaine entre instances, puis une analyse propre la lève", async (context) => {
   const harness = await temporaryHarness(context, {
     torrents: [rawTorrent({
       percent_done: 1,
@@ -891,6 +895,8 @@ test("un échec d'analyse persiste la quarantaine entre instances, puis une anal
       files: [{ name: "incomplet.bin", length: 1, bytes_completed: 0 }],
       file_stats: [{ wanted: true }],
     })],
+    defenderHealthCheck: healthyDefender,
+    scanFile: cleanFileScan,
   });
 
   await assert.rejects(harness.service.scan(1), /incomplet/u);
@@ -905,7 +911,13 @@ test("un échec d'analyse persiste la quarantaine entre instances, puis une anal
   assert.equal(maintenance.changed, false);
   assert.equal(harness.calls.filter(({ method }) => method === "torrent_start" || method === "torrent_start_now").length, startsAfterFailure);
 
-  const restartedService = new TorrentService({ manager: harness.manager, audit: harness.audit, mediaVault: harness.mediaVault });
+  const restartedService = new TorrentService({
+    manager: harness.manager,
+    audit: harness.audit,
+    mediaVault: harness.mediaVault,
+    defenderHealthCheck: healthyDefender,
+    scanFile: cleanFileScan,
+  });
   const startsBeforeInitialize = harness.calls.filter(({ method }) => method === "torrent_start" || method === "torrent_start_now").length;
   await restartedService.initializeSharing();
   assert.equal(harness.calls.filter(({ method }) => method === "torrent_start" || method === "torrent_start_now").length, startsBeforeInitialize);

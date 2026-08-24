@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { createConnection } from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -22,6 +22,19 @@ const enginePath = path.join(
   "transmission-daemon.exe",
 );
 const canRunEngine = process.platform === "win32" && existsSync(enginePath);
+
+async function temporaryDirectory(prefix) {
+  return mkdtemp(path.join(os.tmpdir(), prefix));
+}
+
+async function canonicalPathKey(candidate) {
+  const canonical = await realpath(candidate);
+  return process.platform === "win32" ? canonical.toLowerCase() : canonical;
+}
+
+async function assertSameRealPath(actual, expected, message) {
+  assert.equal(await canonicalPathKey(actual), await canonicalPathKey(expected), message);
+}
 
 async function tcpEndpointAccepts(host, port) {
   return new Promise((resolve) => {
@@ -52,7 +65,7 @@ function bencode(value) {
 }
 
 test("le moteur local signé démarre et répond en JSON-RPC sur son profil isolé", { skip: !canRunEngine, timeout: 30_000 }, async (t) => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "secutorrent-engine-test-"));
+  const directory = await temporaryDirectory("secutorrent-engine-test-");
   const previousPortMapping = process.env.SECUTORRENT_ENABLE_PORTMAP;
   process.env.SECUTORRENT_ENABLE_PORTMAP = "0";
 
@@ -68,8 +81,8 @@ test("le moteur local signé démarre et répond en JSON-RPC sur son profil isol
     await manager.stop();
     if (previousPortMapping === undefined) delete process.env.SECUTORRENT_ENABLE_PORTMAP;
     else process.env.SECUTORRENT_ENABLE_PORTMAP = previousPortMapping;
-    const resolved = path.resolve(directory);
-    const temporaryRoot = `${path.resolve(os.tmpdir())}${path.sep}`;
+    const resolved = await realpath(directory);
+    const temporaryRoot = `${await realpath(os.tmpdir())}${path.sep}`;
     assert.ok(resolved.startsWith(temporaryRoot), "la suppression reste confinée au dossier temporaire");
     await rm(resolved, { recursive: true, force: true });
   });
@@ -79,33 +92,34 @@ test("le moteur local signé démarre et répond en JSON-RPC sur son profil isol
   assert.equal(status.rpcReady, true);
   assert.match(status.version, /^4\.1\.3/u);
   assert.equal(status.portMapping, false);
-  assert.equal(path.resolve(status.quarantineDir), path.resolve(manager.paths.data));
-  assert.equal(path.resolve(status.downloadDir), path.resolve(defaultLibrary));
+  await assertSameRealPath(status.quarantineDir, manager.paths.data);
+  await assertSameRealPath(status.downloadDir, defaultLibrary);
 
   const initialDownloadSession = await manager.rpc.call("session_get", { fields: ["download_dir"] });
-  assert.equal(path.resolve(initialDownloadSession.download_dir), path.resolve(manager.paths.data));
+  await assertSameRealPath(initialDownloadSession.download_dir, manager.paths.data);
 
   const selectedDownloads = path.join(directory, "selected-downloads");
   await mkdir(selectedDownloads, { recursive: true });
   const storageChange = await manager.setDownloadDirectory(selectedDownloads);
   assert.equal(storageChange.changed, true);
-  assert.equal(path.resolve(storageChange.directory), path.resolve(selectedDownloads));
-  assert.equal(path.resolve(manager.status().downloadDir), path.resolve(selectedDownloads));
+  await assertSameRealPath(storageChange.directory, selectedDownloads);
+  await assertSameRealPath(manager.status().downloadDir, selectedDownloads);
   const downloadSession = await manager.rpc.call("session_get", { fields: ["download_dir"] });
-  assert.equal(path.resolve(downloadSession.download_dir), path.resolve(manager.paths.data));
+  await assertSameRealPath(downloadSession.download_dir, manager.paths.data);
   const storagePolicy = JSON.parse(await readFile(path.join(manager.paths.profile, "storage-policy.json"), "utf8"));
   assert.equal(storagePolicy.schemaVersion, 1);
-  assert.equal(storagePolicy.allowedDirectories.some((candidate) => path.resolve(candidate) === path.resolve(selectedDownloads)), true);
-  assert.equal(storagePolicy.allowedDirectories.some((candidate) => path.resolve(candidate) === path.resolve(defaultLibrary)), true);
-  assert.equal(storagePolicy.allowedDirectories.some((candidate) => path.resolve(candidate) === path.resolve(manager.paths.data)), true);
+  const allowedDirectoryKeys = await Promise.all(storagePolicy.allowedDirectories.map(canonicalPathKey));
+  assert.equal(allowedDirectoryKeys.includes(await canonicalPathKey(selectedDownloads)), true);
+  assert.equal(allowedDirectoryKeys.includes(await canonicalPathKey(defaultLibrary)), true);
+  assert.equal(allowedDirectoryKeys.includes(await canonicalPathKey(manager.paths.data)), true);
   await assert.rejects(manager.setDownloadDirectory(path.parse(selectedDownloads).root), /racine d'un disque/u);
   await assert.rejects(manager.setDownloadDirectory(repositoryRoot), /contenir l'application/u);
   const approvedLibrary = path.join(directory, "approved-library");
   await mkdir(approvedLibrary, { recursive: true });
   const approval = await manager.approveLibraryRoot(approvedLibrary);
   assert.equal(approval.changed, true);
-  assert.equal(path.resolve(await manager.resolveAllowedDownloadRoot(approvedLibrary)), path.resolve(approvedLibrary));
-  assert.equal(path.resolve(manager.status().downloadDir), path.resolve(selectedDownloads), "approuver une racine ne change pas la bibliothèque par défaut");
+  await assertSameRealPath(await manager.resolveAllowedDownloadRoot(approvedLibrary), approvedLibrary);
+  await assertSameRealPath(manager.status().downloadDir, selectedDownloads, "approuver une racine ne change pas la bibliothèque par défaut");
   const unapprovedDownloads = path.join(directory, "unapproved-downloads");
   await mkdir(unapprovedDownloads, { recursive: true });
   await assert.rejects(manager.resolveAllowedDownloadRoot(unapprovedDownloads), /n'a pas été autorisé/u);
@@ -126,8 +140,8 @@ test("le moteur local signé démarre et répond en JSON-RPC sur son profil isol
   assert.equal(settings["script-torrent-added-enabled"], false);
   assert.equal(settings["script-torrent-done-enabled"], false);
   assert.equal(settings["script-torrent-done-seeding-enabled"], false);
-  assert.equal(path.resolve(settings["download-dir"]), path.resolve(manager.paths.data));
-  assert.equal(path.resolve(settings["incomplete-dir"]), path.resolve(manager.paths.incomplete));
+  await assertSameRealPath(settings["download-dir"], manager.paths.data);
+  await assertSameRealPath(settings["incomplete-dir"], manager.paths.incomplete);
   assert.equal(String(settings["rpc-password"]).includes("secret-"), false, "le secret RPC ne reste pas en clair après chargement");
   assert.equal(await tcpEndpointAccepts("127.0.0.1", settings["rpc-port"]), true);
 
@@ -168,12 +182,12 @@ test("le moteur local signé démarre et répond en JSON-RPC sur son profil isol
   assert.equal(imported.torrent.files[0].name, "fixture.bin");
   assert.equal(imported.torrent.files[0].length, 1);
   const importedRaw = await manager.rpc.call("torrent_get", { ids: [imported.torrent.id], fields: ["download_dir"] });
-  assert.equal(path.resolve(importedRaw.torrents[0].download_dir), path.resolve(manager.paths.data));
+  await assertSameRealPath(importedRaw.torrents[0].download_dir, manager.paths.data);
   await service.remove({ id: imported.torrent.id, deleteData: false });
 });
 
 test("le dossier choisi persiste après un redémarrage du moteur", { skip: !canRunEngine, timeout: 45_000 }, async (t) => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "slyorent-storage-test-"));
+  const directory = await temporaryDirectory("slyorent-storage-test-");
   const userDataPath = path.join(directory, "profile");
   const defaultLibrary = path.join(directory, "default-library");
   const selectedDownloads = path.join(directory, "downloads");
@@ -199,16 +213,16 @@ test("le dossier choisi persiste après un redémarrage du moteur", { skip: !can
 
   manager = new TransmissionManager({ appPath: repositoryRoot, userDataPath, defaultLibraryPath: defaultLibrary, audit });
   const restarted = await manager.start();
-  assert.equal(path.resolve(restarted.downloadDir), path.resolve(selectedDownloads));
-  assert.equal(path.resolve(restarted.quarantineDir), path.resolve(manager.paths.data));
-  assert.equal(path.resolve(await manager.resolveAllowedDownloadRoot(defaultLibrary)), path.resolve(defaultLibrary));
-  assert.equal(path.resolve(await manager.resolveAllowedDownloadRoot(manager.paths.data)), path.resolve(manager.paths.data));
+  await assertSameRealPath(restarted.downloadDir, selectedDownloads);
+  await assertSameRealPath(restarted.quarantineDir, manager.paths.data);
+  await assertSameRealPath(await manager.resolveAllowedDownloadRoot(defaultLibrary), defaultLibrary);
+  await assertSameRealPath(await manager.resolveAllowedDownloadRoot(manager.paths.data), manager.paths.data);
   const session = await manager.rpc.call("session_get", { fields: ["download_dir"] });
-  assert.equal(path.resolve(session.download_dir), path.resolve(manager.paths.data));
+  await assertSameRealPath(session.download_dir, manager.paths.data);
 });
 
 test("le moteur honore au démarrage le mappage demandé par la politique globale", { skip: !canRunEngine, timeout: 30_000 }, async (t) => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "secutorrent-portmap-test-"));
+  const directory = await temporaryDirectory("secutorrent-portmap-test-");
   const previousPeerPort = process.env.SECUTORRENT_PEER_PORT;
   process.env.SECUTORRENT_PEER_PORT = "52143";
   const userDataPath = path.join(directory, "profile");

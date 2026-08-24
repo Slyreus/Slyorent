@@ -38,5 +38,35 @@ jobs:
       - name: Audit des dépendances de production
         run: npm audit --omit=dev --audit-level=high
 
+      - name: Évaluer Microsoft Defender sur le runner
+        shell: powershell
+        run: |
+          $usable = $false
+          try {
+            $status = Get-MpComputerStatus -ErrorAction Stop
+            $required = @(
+              'AMServiceEnabled',
+              'AntivirusEnabled',
+              'RealTimeProtectionEnabled',
+              'BehaviorMonitorEnabled',
+              'IoavProtectionEnabled'
+            )
+            $protectionsEnabled = ($required | Where-Object { $status.$_ -ne $true }).Count -eq 0
+            $signatureDate = [DateTime]$status.AntivirusSignatureLastUpdated
+            $signatureCurrent = $signatureDate.ToUniversalTime() -ge [DateTime]::UtcNow.AddHours(-72)
+            $usable = $protectionsEnabled -and $signatureCurrent
+          }
+          catch {
+            $usable = $false
+          }
+
+          if ($usable) {
+            Write-Host 'Microsoft Defender est utilisable : le scan réel sera testé.'
+          }
+          else {
+            Add-Content -LiteralPath $env:GITHUB_ENV -Value 'SLYORENT_CI_DEFENDER_UNAVAILABLE=1' -Encoding utf8
+            Write-Warning 'Le runner hébergé ne fournit pas un Defender utilisable. La CI vérifiera le refus fermé, sans simuler un scan réel réussi.'
+          }
+
       - name: Vérifier et tester
         run: npm run check

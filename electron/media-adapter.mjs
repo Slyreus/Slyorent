@@ -5,6 +5,7 @@ import { createReadStream } from "node:fs";
 import { lstat, mkdir, readdir, realpath, rename, stat, statfs, unlink } from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { canonicalPathWithoutLinks, UnsafePathError } from "./safe-path.mjs";
 
 const FFMPEG_SHA256 = "04e1307997530f9cf2fe35cba2ca7e8875ca91da02f89d6c7243df819c94ad00";
 const FFPROBE_SHA256 = "3a7e2dc003dc2cd1472827e4c7c4f056ae1ae0ae7c5bbc580c99b49827351ba4";
@@ -40,8 +41,13 @@ async function verifiedBinary(candidate, expectedHash, label) {
   if (typeof candidate !== "string" || !path.isAbsolute(candidate)) throw new Error(`${label} local est introuvable.`);
   const info = await lstat(candidate);
   if (!info.isFile() || info.isSymbolicLink()) throw new Error(`${label} local n'est pas un fichier régulier.`);
-  const resolved = await realpath(candidate);
-  if (resolved.toLowerCase() !== path.resolve(candidate).toLowerCase()) throw new Error(`${label} local passe par un lien interdit.`);
+  let resolved;
+  try {
+    resolved = await canonicalPathWithoutLinks(candidate);
+  } catch (error) {
+    if (error instanceof UnsafePathError) throw new Error(`${label} local passe par un lien interdit.`);
+    throw error;
+  }
   if (await sha256File(resolved) !== expectedHash) throw new Error(`L'empreinte du binaire ${label} est inattendue.`);
   return resolved;
 }
@@ -132,8 +138,12 @@ export class MediaAdapter {
 
   async initialize() {
     await mkdir(this.#cacheDirectory, { recursive: true, mode: 0o700 });
-    const resolvedCache = await realpath(this.#cacheDirectory);
-    if (resolvedCache.toLowerCase() !== this.#cacheDirectory.toLowerCase()) throw new Error("Le cache média local passe par un lien interdit.");
+    try {
+      this.#cacheDirectory = await canonicalPathWithoutLinks(this.#cacheDirectory);
+    } catch (error) {
+      if (error instanceof UnsafePathError) throw new Error("Le cache média local passe par un lien interdit.");
+      throw error;
+    }
     [this.#ffmpeg, this.#ffprobe] = await Promise.all([
       verifiedBinary(ffmpegPackagePath, FFMPEG_SHA256, "FFmpeg"),
       verifiedBinary(ffprobePackagePath, FFPROBE_SHA256, "FFprobe"),

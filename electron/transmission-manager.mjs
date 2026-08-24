@@ -4,6 +4,7 @@ import { createServer } from "node:net";
 import { access, lstat, mkdir, readFile, readdir, realpath, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { TransmissionRpcClient } from "./transmission-rpc.mjs";
+import { canonicalPathWithoutLinks, UnsafePathError } from "./safe-path.mjs";
 
 const EXPECTED_DAEMON_SHA256 = "397dd842bbb4398f0e35a5b299af19add28d8175564017b6f239a855646665bd";
 const ENGINE_RELATIVE_PATH = path.join(".runtime", "engine", "transmission-4.1.3", "PFiles", "Transmission", "transmission-daemon.exe");
@@ -135,6 +136,7 @@ async function requestedStartupPreferences(profileDirectory) {
 
 export class TransmissionManager {
   #appPath;
+  #canonicalAppPath;
   #userDataPath;
   #audit;
   #process = null;
@@ -154,6 +156,7 @@ export class TransmissionManager {
 
   constructor({ appPath, userDataPath, audit, defaultLibraryPath = null }) {
     this.#appPath = path.resolve(appPath);
+    this.#canonicalAppPath = this.#appPath;
     this.#userDataPath = path.resolve(userDataPath);
     this.#audit = audit;
     this.paths = Object.freeze({
@@ -177,7 +180,7 @@ export class TransmissionManager {
     const info = await lstat(requested);
     if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("Le répertoire choisi doit être un dossier local réel.");
     const canonical = await realpath(requested);
-    if (containsPath(this.#appPath, canonical) || containsPath(canonical, this.#appPath)) {
+    if (containsPath(this.#canonicalAppPath, canonical) || containsPath(canonical, this.#canonicalAppPath)) {
       throw new Error("Le répertoire de téléchargement ne peut pas contenir l'application ni s'y trouver.");
     }
     const protectedRoots = [process.env.SystemRoot, process.env.ProgramFiles, process.env["ProgramFiles(x86)"], process.env.ProgramData]
@@ -236,13 +239,16 @@ export class TransmissionManager {
         throw new Error("Politique de stockage invalide.");
       }
       const candidates = [stored.downloadDirectory, ...stored.allowedDirectories].slice(0, MAX_ALLOWED_DOWNLOAD_DIRECTORIES);
-      for (const candidate of candidates) {
+      let storedSelectionKey = null;
+      for (const [index, candidate] of candidates.entries()) {
         try {
           const canonical = await this.#canonicalDownloadDirectory(candidate);
-          allowed.set(directoryKey(canonical), canonical);
+          const key = directoryKey(canonical);
+          allowed.set(key, canonical);
+          if (index === 0) storedSelectionKey = key;
         } catch { /* Un ancien dossier absent ou non sûr n'est plus autorisé. */ }
       }
-      const storedSelection = allowed.get(directoryKey(stored.downloadDirectory));
+      const storedSelection = storedSelectionKey ? allowed.get(storedSelectionKey) : null;
       selected = storedSelection && directoryKey(storedSelection) !== directoryKey(quarantine) ? storedSelection : fallback;
     } catch (error) {
       if (error?.code !== "ENOENT") await this.#audit.append("storage.policy_rejected", { fallbackUsed: true }).catch(() => undefined);
@@ -315,8 +321,13 @@ export class TransmissionManager {
         if (error?.code === "ENOENT") continue;
         throw error;
       }
-      const resolved = await realpath(candidate);
-      if (resolved.toLowerCase() !== path.resolve(candidate).toLowerCase()) throw new Error("Un lien ou point de reanalyse est interdit pour le moteur Transmission.");
+      let resolved;
+      try {
+        resolved = await canonicalPathWithoutLinks(candidate);
+      } catch (error) {
+        if (error instanceof UnsafePathError) throw new Error("Un lien ou point de reanalyse est interdit pour le moteur Transmission.");
+        throw error;
+      }
       const digest = await sha256File(resolved);
       if (digest !== EXPECTED_DAEMON_SHA256) throw new Error("Empreinte SHA-256 du moteur Transmission inattendue.");
       await verifyEngineDlls(path.dirname(resolved));
@@ -331,6 +342,23 @@ export class TransmissionManager {
     if (directoryKey(this.#defaultLibraryPath) !== directoryKey(this.paths.data)) {
       await mkdir(this.#defaultLibraryPath, { recursive: true, mode: 0o700 });
     }
+    const [canonicalAppPath, canonicalUserData, canonicalProfile, canonicalData, canonicalIncomplete, canonicalDefaultLibrary] = await Promise.all([
+      canonicalPathWithoutLinks(this.#appPath),
+      canonicalPathWithoutLinks(this.#userDataPath),
+      canonicalPathWithoutLinks(this.paths.profile),
+      canonicalPathWithoutLinks(this.paths.data),
+      canonicalPathWithoutLinks(this.paths.incomplete),
+      canonicalPathWithoutLinks(this.#defaultLibraryPath),
+    ]);
+    this.#canonicalAppPath = canonicalAppPath;
+    this.#userDataPath = canonicalUserData;
+    this.paths = Object.freeze({
+      profile: canonicalProfile,
+      data: canonicalData,
+      incomplete: canonicalIncomplete,
+    });
+    this.#defaultLibraryPath = canonicalDefaultLibrary;
+    this.#storagePolicyPath = path.join(this.paths.profile, "storage-policy.json");
     await this.#loadStoragePolicy();
     const executable = await this.#resolveAndVerifyEngine();
     const rpcPort = await findFreeLoopbackPort();

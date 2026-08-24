@@ -207,10 +207,11 @@ function serviceWith({ manager, registry, timeline, scanFile }) {
 }
 
 test("un téléchargement reste réciproque, puis s'arrête et ne seed qu'après validation", async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "slyorent-quarantine-pipeline-"));
+  const temporaryRoot = await realpath(os.tmpdir());
+  const root = await realpath(await mkdtemp(path.join(temporaryRoot, "slyorent-quarantine-pipeline-")));
   t.after(async () => {
     const resolved = path.resolve(root);
-    assert.ok(resolved.startsWith(`${path.resolve(os.tmpdir())}${path.sep}`));
+    assert.ok(containsPath(temporaryRoot, resolved));
     await rm(resolved, { recursive: true, force: true });
   });
   const quarantine = path.join(root, "quarantine");
@@ -366,10 +367,11 @@ test("un téléchargement reste réciproque, puis s'arrête et ne seed qu'après
 });
 
 test("la garde de fin restaure la politique individuelle après validation", async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "slyorent-individual-guard-"));
+  const temporaryRoot = await realpath(os.tmpdir());
+  const root = await realpath(await mkdtemp(path.join(temporaryRoot, "slyorent-individual-guard-")));
   t.after(async () => {
     const resolved = path.resolve(root);
-    assert.ok(resolved.startsWith(`${path.resolve(os.tmpdir())}${path.sep}`));
+    assert.ok(containsPath(temporaryRoot, resolved));
     await rm(resolved, { recursive: true, force: true });
   });
   const quarantine = path.join(root, "quarantine");

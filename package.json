@@ -27,7 +27,7 @@
     "guard:local": "node scripts/assert-local-only.mjs",
     "guard:public": "node scripts/assert-public-safe.mjs",
     "guard:release": "node scripts/assert-public-release.mjs",
-    "test": "node --test tests/*.test.mjs",
+    "test": "node --test --test-concurrency=1 tests/*.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .runtime",
     "typecheck": "tsc --noEmit --incremental false",
     "check": "npm run guard:local && npm run guard:public && npm run typecheck && npm run lint && npm test && npm run build",

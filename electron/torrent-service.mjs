@@ -995,7 +995,7 @@ export class TorrentService {
   }
 
   async #allowedDownloadRoot(downloadDirectory) {
-    return this.#manager.resolveAllowedDownloadRoot(downloadDirectory);
+    return realpath(await this.#manager.resolveAllowedDownloadRoot(downloadDirectory));
   }
 
   #newTorrentDownloadDirectory() {
