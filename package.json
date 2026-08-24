@@ -1,0 +1,68 @@
+{
+  "name": "slyorent",
+  "productName": "Slyorent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Client BitTorrent Windows local avec quarantaine, vérification, analyse Defender, médiathèque et lecteur intégré.",
+  "author": "Slyreus",
+  "license": "SEE LICENSE IN LICENSE",
+  "homepage": "https://github.com/Slyreus/Slyorent#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Slyreus/Slyorent.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Slyreus/Slyorent/issues"
+  },
+  "main": "electron/main.mjs",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5173",
+    "build": "vite build",
+    "start": "npm run build && electron .",
+    "local": "npm run start",
+    "engine:install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-engine.ps1",
+    "guard:local": "node scripts/assert-local-only.mjs",
+    "guard:public": "node scripts/assert-public-safe.mjs",
+    "guard:release": "node scripts/assert-public-release.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .runtime",
+    "typecheck": "tsc --noEmit --incremental false",
+    "check": "npm run guard:local && npm run guard:public && npm run typecheck && npm run lint && npm test && npm run build",
+    "pack:win": "npm run check && electron-builder --win dir --x64",
+    "dist:win": "npm run check && electron-builder --win nsis --x64 && npm run guard:release",
+    "release:win": "npm run engine:install && npm run dist:win"
+  },
+  "dependencies": {
+    "@derhuerst/ffprobe-static": "5.3.0",
+    "ffmpeg-static": "5.3.0",
+    "geoip-lite": "2.0.3",
+    "lucide-react": "^1.33.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.4",
+    "@types/node": "22.19.19",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.5",
+    "electron": "43.4.1",
+    "electron-builder": "26.15.3",
+    "eslint": "9.39.4",
+    "eslint-plugin-jsx-a11y": "6.10.2",
+    "eslint-plugin-react": "7.37.5",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "16.4.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.59.3",
+    "vite": "8.2.1"
+  },
+  "type": "module",
+  "allowScripts": {
+    "@derhuerst/ffprobe-static@5.3.0": true,
+    "ffmpeg-static@5.3.0": true
+  }
+}

@@ -1,0 +1,83 @@
+appId: com.slyreus.slyorent
+productName: Slyorent
+copyright: Copyright © 2026 Slyreus
+
+directories:
+  output: release
+
+asar: true
+compression: maximum
+npmRebuild: false
+removePackageScripts: true
+asarUnpack:
+  - node_modules/ffmpeg-static/ffmpeg.exe
+  - node_modules/@derhuerst/ffprobe-static/ffprobe.exe
+
+electronFuses:
+  runAsNode: false
+  enableCookieEncryption: true
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+
+files:
+  - dist/**
+  - electron/**
+  - public/slyorus.png
+  - package.json
+  - LICENSE
+  - THIRD_PARTY_NOTICES.md
+  - "!**/*.map"
+
+extraResources:
+  - from: .runtime/engine/transmission-4.1.3/PFiles/Transmission
+    to: .runtime/engine/transmission-4.1.3/PFiles/Transmission
+    filter:
+      - transmission-daemon.exe
+      - qt.conf
+      - "*.dll"
+      - imageformats/*.dll
+      - platforms/*.dll
+      - styles/*.dll
+      - tls/*.dll
+  - from: LICENSE
+    to: licenses/Slyorent-LICENSE.txt
+  - from: THIRD_PARTY_NOTICES.md
+    to: licenses/THIRD_PARTY_NOTICES.md
+  - from: third_party/transmission-COPYING.txt
+    to: licenses/Transmission-COPYING.txt
+  - from: node_modules/ffmpeg-static/ffmpeg.exe.LICENSE
+    to: licenses/FFmpeg-GPL-3.0.txt
+  - from: node_modules/ffmpeg-static/ffmpeg.exe.README
+    to: licenses/FFmpeg-BUILD.txt
+  - from: node_modules/geoip-lite/LICENSE
+    to: licenses/geoip-lite-and-GeoLite2-LICENSE.txt
+  - from: app/components/WORLD_GEOMETRY_LICENSE.md
+    to: licenses/WORLD_GEOMETRY_LICENSE.md
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: public/slyorus.png
+  requestedExecutionLevel: asInvoker
+  artifactName: Slyorent-Setup-${version}.${ext}
+
+nsis:
+  oneClick: true
+  perMachine: false
+  allowElevation: false
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: Slyorent
+  uninstallDisplayName: Slyorent
+  runAfterFinish: true
+  deleteAppDataOnUninstall: false
+
+publish:
+  provider: github
+  owner: Slyreus
+  repo: Slyorent
+  releaseType: release
