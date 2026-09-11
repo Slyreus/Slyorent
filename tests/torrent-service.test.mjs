@@ -10,6 +10,23 @@ const SECOND_HASH = "89abcdef0123456789abcdef0123456789abcdef";
 const THIRD_HASH = "fedcba9876543210fedcba9876543210fedcba98";
 const MAGNET = `magnet:?xt=urn:btih:${HASH}&dn=Contenu%20autorise`;
 
+test("annuler une ouverture média avant son démarrage sans contacter le moteur", async () => {
+  const { service, calls } = statefulHarness();
+  const requestId = "11111111-1111-4111-8111-111111111111";
+  service.cancelMediaPreparation(requestId, 42);
+  await assert.rejects(service.openMedia({ id: 1, fileIndex: 0, requestId }, 42), { name: "AbortError" });
+  assert.equal(calls.length, 0);
+  assert.throws(() => service.cancelMediaPreparation("not-a-request", 42), /invalide/);
+});
+
+test("limiter l'annulation d'une préparation à sa fenêtre", async () => {
+  const { service, calls } = statefulHarness();
+  const requestId = "22222222-2222-4222-8222-222222222222";
+  service.cancelMediaPreparation(requestId, 43);
+  await assert.rejects(service.openMedia({ id: 1, fileIndex: 0, requestId }, 42), (error) => error.name !== "AbortError");
+  assert.ok(calls.length > 0);
+});
+
 function rawTorrent(overrides = {}) {
   return {
     id: 1,

@@ -1,6 +1,6 @@
 # Composants tiers
 
-Slyorent distribue plusieurs composants qui gardent leur licence d’origine. Ce fichier ne remplace pas leurs textes de licence, présents dans les paquets ou dans les liens source indiqués ici.
+Slyorrent distribue plusieurs composants qui gardent leur licence d’origine. Ce fichier ne remplace pas leurs textes de licence, présents dans les paquets ou dans les liens source indiqués ici.
 
 ## Transmission 4.1.3
 

@@ -40,7 +40,10 @@ test("un média synthétique AC3 devient un MP4 H264/AAC réutilisable", { timeo
 
     const source = await stat(sourcePath);
     const adapter = await new MediaAdapter({ cacheDirectory }).initialize();
-    const first = await adapter.prepare({ sourcePath, sourceSize: source.size, sourceMtimeMs: source.mtimeMs });
+    const options = { sourcePath, sourceSize: source.size, sourceMtimeMs: source.mtimeMs };
+    const [first, concurrent] = await Promise.all([adapter.prepare(options), adapter.prepare(options)]);
+    assert.equal(first.filePath, concurrent.filePath);
+    assert.equal(concurrent.cacheHit, false);
     assert.equal(first.audioAdapted, true);
     assert.equal(first.audioCodec, "AAC");
     assert.equal(first.audioLanguage, "fre");

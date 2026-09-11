@@ -4,6 +4,6 @@ import Home from "../app/page";
 import "../app/globals.css";
 
 const root = document.getElementById("root");
-if (!root) throw new Error("Élément racine Slyorent introuvable.");
+if (!root) throw new Error("Élément racine Slyorrent introuvable.");
 
 createRoot(root).render(<StrictMode><Home /></StrictMode>);

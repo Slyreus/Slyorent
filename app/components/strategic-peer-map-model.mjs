@@ -121,9 +121,10 @@ function normalizePeer(value) {
 export function normalizePeers(value) {
   if (!Array.isArray(value)) return Object.freeze([]);
   const peers = [];
+  const identities = new Set();
   for (const item of value.slice(0, MAX_INPUT_PEERS)) {
     const peer = normalizePeer(item);
-    if (peer) peers.push(peer);
+    if (peer && !identities.has(peer.id)) { peers.push(peer); identities.add(peer.id); }
     if (peers.length === MAX_RENDERED_PEERS) break;
   }
   return Object.freeze(peers);

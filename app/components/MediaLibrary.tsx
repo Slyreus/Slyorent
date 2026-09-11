@@ -1,47 +1,14 @@
 "use client";
 
-import {
-  ChevronDown,
-  CirclePlay,
-  Clock3,
-  Film,
-  FolderCog,
-  FolderLock,
-  FolderOpen,
-  Library,
-  LoaderCircle,
-  LockKeyhole,
-  Maximize2,
-  Minimize2,
-  Music2,
-  ScanSearch,
-  Search,
-  ShieldCheck,
-  SkipBack,
-  SkipForward,
-  X,
-} from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
-import {
-  buildMediaLibrary,
-  flattenPlayableSeries,
-  type MediaEpisode,
-  type TorrentMediaGroup,
-} from "../../lib/media-library";
+import { Check, ChevronDown, CirclePlay, FolderCog, FolderOpen, Library, LoaderCircle, LockKeyhole, ScanSearch, Search, ShieldCheck, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { buildMediaLibrary, buildPlaybackQueue, type MediaEpisode, type TorrentMediaGroup } from "../../lib/media-library";
+import { canResume, formatMediaTime, MediaPlaybackSession, watchPercentage, type WatchRecord } from "../../lib/media-playback";
+import { MediaPlayer } from "./MediaPlayer";
+import { VideoThumbnail } from "./VideoThumbnail";
 import "./media-library.css";
 
-export type MediaBridge = Pick<NonNullable<Window["secuTorrent"]>, "openMedia" | "verifyAndScan" | "chooseDownloadDirectory" | "openDownloadDirectory" | "openTorrentDirectory">;
-
-type PlayerSource = {
-  episode: MediaEpisode;
-  url: string;
-  mimeType: string;
-  expiresAt: string;
-  audioAdapted: boolean;
-  audioCodec: string | null;
-  audioLanguage: string | null;
-};
-
+export type MediaBridge = Pick<NonNullable<Window["secuTorrent"]>, "openMedia" | "renewMedia" | "releaseMedia" | "cancelMediaPreparation" | "watchHistory" | "savePlayback" | "setMediaWatched" | "verifyAndScan" | "chooseDownloadDirectory" | "openDownloadDirectory" | "openTorrentDirectory">;
 export type MediaLibraryProps = {
   torrents: readonly SecuTorrentTorrent[];
   bridge?: MediaBridge;
@@ -51,485 +18,157 @@ export type MediaLibraryProps = {
   onNotice?: (tone: "success" | "error" | "info", message: string) => void;
   className?: string;
 };
-
-export type VideoThumbnailProps = {
-  episode: MediaEpisode;
-  getBridge: () => MediaBridge;
-};
-
-const numberFormat = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 });
-const ratioFormatSmall = new Intl.NumberFormat("fr-FR", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
-const ratioFormatTiny = new Intl.NumberFormat("fr-FR", { minimumFractionDigits: 4, maximumFractionDigits: 4 });
-
-function formatBytes(value: number) {
-  if (!Number.isFinite(value) || value <= 0) return "0 o";
-  const units = ["o", "Ko", "Mo", "Go", "To"];
-  let current = value;
-  let unit = 0;
-  while (current >= 1024 && unit < units.length - 1) { current /= 1024; unit += 1; }
-  return `${numberFormat.format(current)} ${units[unit]}`;
-}
-
-function formatTime(value: number) {
-  if (!Number.isFinite(value) || value < 0) return "0:00";
-  const seconds = Math.floor(value % 60).toString().padStart(2, "0");
-  const minutes = Math.floor(value / 60) % 60;
-  const hours = Math.floor(value / 3600);
-  return hours > 0 ? `${hours}:${minutes.toString().padStart(2, "0")}:${seconds}` : `${minutes}:${seconds}`;
-}
-
-function formatRatio(value: number) {
-  const ratio = Number(value);
-  if (!Number.isFinite(ratio) || ratio <= 0) return "0";
-  if (ratio < .0001) return "< 0,0001";
-  if (ratio < .01) return ratioFormatTiny.format(ratio);
-  if (ratio < .1) return ratioFormatSmall.format(ratio);
-  return numberFormat.format(ratio);
-}
-
-function episodeOrdinal(episode: MediaEpisode) {
-  if (episode.episodeNumber === null) return episode.kind === "audio" ? "Piste" : "Film";
-  return `E${String(episode.episodeNumber).padStart(2, "0")}`;
-}
-
-function readableError(error: unknown) {
-  return error instanceof Error && error.message ? error.message : "Flux média indisponible.";
-}
-
-function directoryLabel(value: string) {
-  return value.replace(/[\\/]+$/u, "").split(/[\\/]/u).filter(Boolean).at(-1) || "Dossier local";
-}
-
-function isLocalMediaUrl(value: string) {
-  try {
-    const parsed = new URL(value);
-    return parsed.protocol === "secutorrent-media:"
-      && parsed.hostname === "stream"
-      && /^[A-Za-z0-9_-]{43}$/u.test(parsed.pathname.slice(1))
-      && parsed.username === ""
-      && parsed.password === ""
-      && parsed.port === ""
-      && parsed.search === ""
-      && parsed.hash === "";
-  } catch {
-    return false;
-  }
-}
-
-function isFrenchLanguage(value: string | null) {
-  return new Set(["fr", "fre", "fra", "french"]).has(String(value || "").toLowerCase());
-}
-
-function releaseSource(source: PlayerSource | null) {
-  if (source?.url.startsWith("blob:")) URL.revokeObjectURL(source.url);
-}
-
-let activeThumbnailLoads = 0;
-const thumbnailQueue: Array<() => void> = [];
-
-function pumpThumbnailQueue() {
-  while (activeThumbnailLoads < 2 && thumbnailQueue.length) thumbnailQueue.shift()?.();
-}
-
-function scheduleThumbnail<T>(task: () => Promise<T>) {
-  return new Promise<T>((resolve, reject) => {
-    thumbnailQueue.push(() => {
-      activeThumbnailLoads += 1;
-      task().then(resolve, reject).finally(() => { activeThumbnailLoads -= 1; pumpThumbnailQueue(); });
-    });
-    pumpThumbnailQueue();
-  });
-}
+type WatchFilter = "all" | "continue" | "unwatched" | "completed";
+const PAGE_SIZE = 50;
+const flatten = (groups: TorrentMediaGroup[]) => groups.flatMap((group) => group.series.flatMap((series) => series.seasons.flatMap((season) => season.episodes)));
+const readableError = (error: unknown) => error instanceof Error ? error.message : "Action indisponible.";
 
 export function MediaLibraryView({ torrents, bridge, initialQuery = "", downloadDirectory = "", onDirectoryChanged, onNotice, className = "" }: MediaLibraryProps) {
   const [query, setQuery] = useState(initialQuery);
-  const [source, setSource] = useState<PlayerSource | null>(null);
-  const [loadingKey, setLoadingKey] = useState<string | null>(null);
-  const [collectionAction, setCollectionAction] = useState<string | null>(null);
-  const [directoryAction, setDirectoryAction] = useState<"choose" | "open" | null>(null);
+  const [filter, setFilter] = useState<WatchFilter>("all");
+  const [collection, setCollection] = useState("");
+  const [season, setSeason] = useState("");
+  const [limit, setLimit] = useState(PAGE_SIZE);
+  const [history, setHistory] = useState<Record<string, WatchRecord>>({});
+  const [historyReady, setHistoryReady] = useState(false);
+  const [selected, setSelected] = useState<{ episode: MediaEpisode; record?: WatchRecord; session: MediaPlaybackSession } | null>(null);
   const [error, setError] = useState("");
-  const [playing, setPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [nativeFullscreen, setNativeFullscreen] = useState(false);
-  const [fallbackFullscreen, setFallbackFullscreen] = useState(false);
-  const dialogRef = useRef<HTMLDialogElement>(null);
-  const playerFrameRef = useRef<HTMLDivElement>(null);
+  const [busy, setBusy] = useState("");
+  const sessionRef = useRef<MediaPlaybackSession | null>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
 
-  const fullLibrary = useMemo(() => buildMediaLibrary(torrents), [torrents]);
-  const visibleLibrary = useMemo(() => buildMediaLibrary(torrents, query), [query, torrents]);
-  const visibleCount = useMemo(() => visibleLibrary.reduce((total, torrent) => total + torrent.total, 0), [visibleLibrary]);
-
-  const playlist = useMemo(() => {
-    if (!source) return [];
-    const torrent = fullLibrary.find((group) => group.torrentId === source.episode.torrentId);
-    const series = torrent?.series.find((group) => group.title === source.episode.seriesTitle);
-    return torrent && series ? flattenPlayableSeries(torrent, series.key) : [];
-  }, [fullLibrary, source]);
-  const playlistIndex = source ? playlist.findIndex((episode) => episode.key === source.episode.key) : -1;
-  const previousEpisode = playlistIndex > 0 ? playlist[playlistIndex - 1] : null;
-  const nextEpisode = playlistIndex >= 0 && playlistIndex < playlist.length - 1 ? playlist[playlistIndex + 1] : null;
-
-  const activeBridge = useCallback(() => {
-    const candidate = bridge ?? (typeof window !== "undefined" ? window.secuTorrent : undefined);
+  const getBridge = useCallback(() => {
+    const candidate = bridge ?? window.secuTorrent;
     if (!candidate) throw new Error("Interface média indisponible.");
     return candidate;
   }, [bridge]);
-
-  const closePlayer = useCallback(() => {
-    if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
-    setFallbackFullscreen(false);
-    const dialog = dialogRef.current;
-    if (dialog?.open) dialog.close();
-    setSource((current) => { releaseSource(current); return null; });
-    setPlaying(false);
-    setError("");
-    window.requestAnimationFrame(() => returnFocusRef.current?.focus());
+  const updateProgress = useCallback((key: string, record: WatchRecord) => {
+    setHistory((current) => current[key]?.updatedAt > record.updatedAt ? current : { ...current, [key]: record });
   }, []);
 
-  const openEpisode = useCallback(async (episode: MediaEpisode, trigger?: HTMLElement | null) => {
-    if (!episode.playable) {
-      const message = "Lecture bloquée · fichier incomplet ou non validé.";
-      setError(message);
-      onNotice?.("error", message);
-      return;
-    }
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.resolve().then(() => getBridge().watchHistory()).then((records) => {
+      if (!cancelled) { setHistory((current) => ({ ...records, ...current })); setHistoryReady(true); }
+    }).catch(() => {
+      if (!cancelled) { setError("Suivi de lecture indisponible. Fermer puis rouvrir la médiathèque."); setHistoryReady(true); }
+    });
+    return () => { cancelled = true; };
+  }, [getBridge]);
+  useEffect(() => () => sessionRef.current?.dispose(), []);
+
+  const library = useMemo(() => buildMediaLibrary(torrents), [torrents]);
+  const allEpisodes = useMemo(() => flatten(library), [library]);
+  const searched = useMemo(() => flatten(buildMediaLibrary(torrents, query)), [torrents, query]);
+  const selectedCollection = library.find((item) => String(item.torrentId) === collection);
+  const availableSeasons = [...new Set(allEpisodes.filter((episode) => !collection || String(episode.torrentId) === collection).map((episode) => episode.seasonNumber).filter((number) => number !== null))].sort((a, b) => a - b);
+  const filtered = searched.filter((episode) => {
+    if (collection && String(episode.torrentId) !== collection) return false;
+    if (season && String(episode.seasonNumber) !== season) return false;
+    const record = history[episode.watchKey];
+    return filter === "all" || (filter === "continue" && canResume(record)) || (filter === "completed" && record?.completed) || (filter === "unwatched" && !record?.completed && !canResume(record));
+  });
+  if (filter === "continue") filtered.sort((a, b) => (history[b.watchKey]?.updatedAt || 0) - (history[a.watchKey]?.updatedAt || 0));
+  const continuing = allEpisodes.filter((episode) => episode.playable && canResume(history[episode.watchKey])).sort((a, b) => history[b.watchKey].updatedAt - history[a.watchKey].updatedAt);
+  const completedCount = allEpisodes.filter((episode) => history[episode.watchKey]?.completed).length;
+
+  function play(episode: MediaEpisode, trigger?: HTMLElement) {
+    if (!episode.playable) return;
     if (trigger) returnFocusRef.current = trigger;
-    setLoadingKey(episode.key);
+    if (!sessionRef.current) sessionRef.current = new MediaPlaybackSession(getBridge());
+    setSelected({ episode, record: history[episode.watchKey], session: sessionRef.current });
+  }
+
+  function closePlayer() {
+    setSelected(null);
+    sessionRef.current?.dispose();
+    sessionRef.current = null;
+    window.requestAnimationFrame(() => returnFocusRef.current?.focus());
+  }
+
+  async function runAction(key: string, task: () => Promise<unknown>) {
+    setBusy(key);
     setError("");
-    try {
-      const result = await activeBridge().openMedia({ id: episode.torrentId, fileIndex: episode.fileIndex, purpose: "playback" });
-      if (!result?.url || !isLocalMediaUrl(result.url)) throw new Error("Flux local refusé.");
-      setCurrentTime(0);
-      setDuration(0);
-      setPlaying(false);
-      setSource((current) => {
-        releaseSource(current);
-        return {
-          episode,
-          url: result.url,
-          mimeType: result.mimeType,
-          expiresAt: result.expiresAt,
-          audioAdapted: result.audioAdapted === true,
-          audioCodec: result.audioCodec ?? null,
-          audioLanguage: result.audioLanguage ?? null,
-        };
-      });
-    } catch (caught) {
-      const message = readableError(caught);
-      setError(message);
-      onNotice?.("error", message);
-    } finally {
-      setLoadingKey(null);
-    }
-  }, [activeBridge, onNotice]);
-
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog || !source || dialog.open) return;
-    dialog.showModal();
-    const frame = window.requestAnimationFrame(() => dialog.querySelector<HTMLElement>("[data-player-close]")?.focus());
-    return () => window.cancelAnimationFrame(frame);
-  }, [source]);
-
-  useEffect(() => {
-    const onFullscreenChange = () => {
-      const frame = playerFrameRef.current;
-      setNativeFullscreen(Boolean(frame && document.fullscreenElement === frame));
-    };
-    document.addEventListener("fullscreenchange", onFullscreenChange);
-    return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
-  }, []);
-
-  useEffect(() => {
-    if (!fallbackFullscreen) return;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => { document.body.style.overflow = previousOverflow; };
-  }, [fallbackFullscreen]);
-
-  useEffect(() => () => releaseSource(source), [source]);
-
-  async function toggleFullscreen() {
-    const frame = playerFrameRef.current;
-    if (!frame) return;
-    if (document.fullscreenElement) {
-      await document.exitFullscreen().catch(() => undefined);
-      return;
-    }
-    if (fallbackFullscreen) { setFallbackFullscreen(false); return; }
-    try {
-      if (typeof frame.requestFullscreen !== "function") throw new Error("Fullscreen indisponible");
-      await frame.requestFullscreen();
-    } catch {
-      setFallbackFullscreen(true);
-    }
+    try { await task(); }
+    catch (caught) { const message = readableError(caught); setError(message); onNotice?.("error", message); }
+    finally { setBusy(""); }
   }
 
-  function handlePlay(event: ReactMouseEvent<HTMLButtonElement>, episode: MediaEpisode) {
-    void openEpisode(episode, event.currentTarget);
+  async function markWatched(episode: MediaEpisode) {
+    await runAction(`watched-${episode.key}`, async () => {
+      const record = await getBridge().setMediaWatched({ id: episode.torrentId, fileIndex: episode.fileIndex, watched: !history[episode.watchKey]?.completed });
+      updateProgress(record.key, record);
+    });
   }
 
-  function handlePlaybackError() {
-    setPlaying(false);
-    setError("Codec audio ou vidéo non pris en charge.");
-  }
-
-  async function runCollectionValidation(group: TorrentMediaGroup) {
-    const key = `validate-${group.torrentId}`;
-    setCollectionAction(key);
-    setError("");
-    try {
-      await activeBridge().verifyAndScan(group.torrentId);
-      onNotice?.("success", `Vérification et analyse terminées · ${group.torrentName}`);
-    } catch (caught) {
-      const message = readableError(caught);
-      setError(message);
-      onNotice?.("error", message);
-    } finally {
-      setCollectionAction(null);
-    }
-  }
-
-  async function openTorrentDirectory(group: TorrentMediaGroup) {
-    setCollectionAction(`folder-${group.torrentId}`);
-    setError("");
-    try {
-      await activeBridge().openTorrentDirectory(group.torrentId);
-    } catch (caught) {
-      const message = readableError(caught);
-      setError(message);
-      onNotice?.("error", message);
-    } finally { setCollectionAction(null); }
-  }
-
-  async function chooseDownloadDirectory() {
-    setDirectoryAction("choose");
-    setError("");
-    try {
-      const result = await activeBridge().chooseDownloadDirectory();
-      if (!result.canceled) {
-        onNotice?.("success", "Bibliothèque par défaut modifiée.");
-        onDirectoryChanged?.();
-      }
-    } catch (caught) {
-      const message = readableError(caught);
-      setError(message);
-      onNotice?.("error", message);
-    } finally { setDirectoryAction(null); }
-  }
-
-  async function openDefaultDownloadDirectory() {
-    setDirectoryAction("open");
-    setError("");
-    try {
-      await activeBridge().openDownloadDirectory();
-    } catch (caught) {
-      const message = readableError(caught);
-      setError(message);
-      onNotice?.("error", message);
-    } finally { setDirectoryAction(null); }
-  }
-
-  const expanded = nativeFullscreen || fallbackFullscreen;
+  const playlist = selected ? buildPlaybackQueue(allEpisodes, selected.episode) : [];
+  const playlistIndex = playlist.findIndex((episode) => episode.key === selected?.episode.key);
+  const renderCollectionTools = (group: TorrentMediaGroup) => <div className="sly-media-collection-tools" key={group.key}>
+    <span title={group.torrentName}><Library size={16} /><strong>{group.torrentName}</strong><small>{group.playable}/{group.total} prêts</small></span>
+    <button type="button" disabled={Boolean(busy) || group.percentDone < .999999 || ["verifying", "queued-verification"].includes(group.status)} onClick={() => void runAction(`scan-${group.key}`, async () => { await getBridge().verifyAndScan(group.torrentId); onNotice?.("success", "Vérification et analyse terminées."); })}>
+      {busy === `scan-${group.key}` ? <LoaderCircle size={15} className="sly-media-spin" /> : <ScanSearch size={15} />} Vérifier et analyser
+    </button>
+    <button type="button" disabled={Boolean(busy)} onClick={() => void runAction(`folder-${group.key}`, () => getBridge().openTorrentDirectory(group.torrentId))}><FolderOpen size={15} /> Dossier</button>
+  </div>;
 
   return <section className={`sly-media-library ${className}`.trim()} data-testid="media-library" aria-labelledby="sly-media-library-title">
     <header className="sly-media-hero">
-      <div className="sly-media-hero-copy">
-        <span className="sly-media-eyebrow"><Library size={14} /> BIBLIOTHÈQUE PAR DÉFAUT</span>
-        <h1 id="sly-media-library-title">Médiathèque</h1>
-        <p>Classement par torrent, série et saison. Lecture après validation Defender.</p>
-      </div>
-      <div className="sly-media-hero-art" aria-hidden="true"><img src="./slyorus.png" alt="" /><span><ShieldCheck size={13} /> fichiers validés</span></div>
+      <div className="sly-media-hero-copy"><span className="sly-media-eyebrow"><Library size={14} /> SLYORRENT / MÉDIAS LOCAUX</span><h1 id="sly-media-library-title">Médiathèque</h1><p>{allEpisodes.length} médias · {continuing.length} à reprendre · {completedCount} terminés</p></div>
+      <div className="sly-media-hero-art" aria-hidden="true"><img src="./slyorus.png" alt="" /><span><ShieldCheck size={13} /> Lecture après validation</span></div>
     </header>
 
+    {continuing.length > 0 && filter === "all" && !query && !collection && <section className="sly-media-resume-section" aria-label="À reprendre">
+      <header><h2>À reprendre</h2><button type="button" onClick={() => { setFilter("continue"); setLimit(PAGE_SIZE); }}>Tout voir <span>{continuing.length}</span></button></header>
+      <div className="sly-media-resume-cards">{continuing.slice(0, 4).map((episode) => <button type="button" key={episode.key} onClick={(event) => play(episode, event.currentTarget)}>
+        <VideoThumbnail episode={episode} getBridge={getBridge} suspended={Boolean(selected)} />
+        <span className="sly-media-resume-copy"><small>{episode.seriesTitle} · {episodeLabel(episode)}</small><strong>{episode.episodeTitle}</strong><span><CirclePlay size={14} /> Reprendre à {formatMediaTime(history[episode.watchKey].position)}</span><WatchProgress record={history[episode.watchKey]} /></span>
+      </button>)}</div>
+    </section>}
+
     <div className="sly-media-toolbar">
-      <label className="sly-media-search"><Search size={17} /><span className="sly-media-visually-hidden">Rechercher dans la médiathèque</span><input value={query} onChange={(event) => setQuery(event.target.value)} type="search" placeholder="Série, saison, épisode, torrent…" aria-label="Rechercher dans la médiathèque" /></label>
-      <div className="sly-media-folder-tools">
-        <span className="sly-media-folder-label" title={downloadDirectory}><FolderLock size={15} /><span><small>NOUVEAUX TORRENTS</small><b>{directoryLabel(downloadDirectory)}</b></span></span>
-        <button type="button" disabled={directoryAction !== null} onClick={() => void chooseDownloadDirectory()} title="Changer le dossier des nouveaux téléchargements">{directoryAction === "choose" ? <LoaderCircle className="sly-media-spin" size={15} /> : <FolderCog size={15} />} Changer</button>
-        <button type="button" disabled={directoryAction !== null} onClick={() => void openDefaultDownloadDirectory()} title="Ouvrir le dossier dans l’Explorateur Windows">{directoryAction === "open" ? <LoaderCircle className="sly-media-spin" size={15} /> : <FolderOpen size={15} />} Ouvrir</button>
+      <label className="sly-media-search"><Search size={17} /><input value={query} onChange={(event) => { setQuery(event.target.value); setLimit(PAGE_SIZE); }} type="search" placeholder="Série, film, épisode…" aria-label="Rechercher dans la médiathèque" /></label>
+      <div className="sly-media-folder-tools"><span className="sly-media-folder-label" title={downloadDirectory}><FolderOpen size={15} /><span><small>BIBLIOTHÈQUE</small><b>{downloadDirectory.split(/[\\/]/u).filter(Boolean).at(-1) || "Dossier local"}</b></span></span>
+        <button type="button" disabled={Boolean(busy)} onClick={() => void runAction("choose", async () => { if (!(await getBridge().chooseDownloadDirectory()).canceled) onDirectoryChanged?.(); })}><FolderCog size={15} /> Changer</button>
+        <button type="button" disabled={Boolean(busy)} onClick={() => void runAction("open", () => getBridge().openDownloadDirectory())}><FolderOpen size={15} /> Ouvrir</button>
       </div>
-      <div className="sly-media-result" role="status" aria-live="polite"><b>{visibleCount}</b><span>média{visibleCount > 1 ? "s" : ""}</span><i /> <b>{visibleLibrary.reduce((total, group) => total + group.playable, 0)}</b><span>prêt{visibleLibrary.reduce((total, group) => total + group.playable, 0) > 1 ? "s" : ""}</span></div>
+    </div>
+    <div className="sly-media-filters">
+      <div className="sly-media-filter-tabs" role="group" aria-label="Filtrer par visionnage">{([["all", "Tout"], ["continue", "À reprendre"], ["unwatched", "Non vus"], ["completed", "Terminés"]] as const).map(([value, label]) => <button key={value} type="button" aria-pressed={filter === value} onClick={() => { setFilter(value); setLimit(PAGE_SIZE); }}>{label}</button>)}</div>
+      <select aria-label="Filtrer par torrent" value={collection} onChange={(event) => { setCollection(event.target.value); setSeason(""); setLimit(PAGE_SIZE); }}><option value="">Tous les torrents</option>{library.map((group) => <option key={group.key} value={String(group.torrentId)}>{group.torrentName}</option>)}</select>
+      <select aria-label="Filtrer par saison" value={season} onChange={(event) => { setSeason(event.target.value); setLimit(PAGE_SIZE); }}><option value="">Toutes les saisons</option>{availableSeasons.map((number) => <option key={number} value={String(number)}>Saison {number}</option>)}</select>
+      <span className="sly-media-result" role="status">{filtered.length} média{filtered.length > 1 ? "s" : ""}</span>
     </div>
 
-    {error && !source && <div className="sly-media-alert" role="alert"><LockKeyhole size={16} /> {error}<button type="button" onClick={() => setError("")} aria-label="Fermer l’alerte"><X size={14} /></button></div>}
+    {error && <div className="sly-media-alert" role="alert"><LockKeyhole size={16} /> {error}<button type="button" onClick={() => setError("")} aria-label="Fermer l’alerte"><X size={14} /></button></div>}
+    {selectedCollection ? renderCollectionTools(selectedCollection) : library.length > 0 && <details className="sly-media-manage"><summary><FolderCog size={15} /> Dossiers et analyses <ChevronDown size={14} /></summary><div>{library.map(renderCollectionTools)}</div></details>}
 
-    {visibleLibrary.length ? <div className="sly-media-torrents">
-      {visibleLibrary.map((torrent) => <TorrentCollection key={torrent.key} group={torrent} loadingKey={loadingKey} collectionAction={collectionAction} onPlay={handlePlay} onValidate={() => void runCollectionValidation(torrent)} onOpenDirectory={() => void openTorrentDirectory(torrent)} getBridge={activeBridge} />)}
-    </div> : <div className="sly-media-empty">
-      <span><FolderLock size={28} /></span>
-      <h2>{query ? "Aucun média correspondant" : "Aucun média détecté"}</h2>
-      <p>{query ? "Aucun nom, torrent, saison ou épisode correspondant." : "Audio et vidéo validés par Defender uniquement."}</p>
-    </div>}
+    <div className="sly-media-list" aria-label="Médias">
+      {filtered.slice(0, limit).map((episode) => <article key={episode.key} className={`sly-media-row ${history[episode.watchKey]?.completed ? "is-watched" : ""}`}>
+        <button type="button" className="sly-media-row-main" disabled={!episode.playable || !historyReady} onClick={(event) => play(episode, event.currentTarget)} aria-label={`Lire ${episode.seriesTitle} ${episodeLabel(episode)} — ${episode.episodeTitle}`} title={episode.playable ? episode.fileName : episode.completed ? "Vérification et analyse requises" : "Téléchargement incomplet"}>
+          <VideoThumbnail episode={episode} getBridge={getBridge} suspended={Boolean(selected)} />
+          <span className="sly-media-row-copy"><strong>{episode.episodeTitle}</strong><span>{episode.seriesTitle} <b>{episodeLabel(episode)}</b></span><small>{episode.playable ? <><ShieldCheck size={11} /> Validé</> : <><LockKeyhole size={11} /> {episode.completed ? "Analyse requise" : "Incomplet"}</>} · {episode.extension.toUpperCase()}</small></span>
+          <WatchProgress record={history[episode.watchKey]} />
+          <span className="sly-media-play-icon"><CirclePlay size={25} /></span>
+        </button>
+        <button type="button" className="sly-media-mark" disabled={!historyReady || Boolean(busy)} aria-label={`${history[episode.watchKey]?.completed ? "Marquer comme non vu" : "Marquer comme vu"} : ${episode.episodeTitle}`} title={history[episode.watchKey]?.completed ? "Marquer comme non vu" : "Marquer comme vu"} aria-pressed={Boolean(history[episode.watchKey]?.completed)} onClick={() => void markWatched(episode)}>{busy === `watched-${episode.key}` ? <LoaderCircle size={16} className="sly-media-spin" /> : <Check size={17} />}</button>
+      </article>)}
+    </div>
+    {filtered.length > limit && <button className="sly-media-load-more" type="button" onClick={() => setLimit((value) => value + PAGE_SIZE)}>Afficher la suite · {filtered.length - limit} médias</button>}
+    {!filtered.length && <div className="sly-media-empty"><Library size={26} /><h2>{allEpisodes.length ? "Aucun média correspondant" : "Aucun média détecté"}</h2><p>{allEpisodes.length ? "Changer les filtres ou la recherche." : "Les vidéos et pistes audio apparaîtront ici."}</p></div>}
 
-    <dialog ref={dialogRef} className="sly-media-dialog" aria-labelledby="sly-media-player-title" onCancel={(event) => {
-      if (fallbackFullscreen) { event.preventDefault(); setFallbackFullscreen(false); }
-      else { event.preventDefault(); closePlayer(); }
-    }} onClose={() => {
-      setFallbackFullscreen(false);
-      setSource((current) => { releaseSource(current); return null; });
-      setPlaying(false);
-      setError("");
-      window.requestAnimationFrame(() => returnFocusRef.current?.focus());
-    }}>
-      {source && <div ref={playerFrameRef} className={`sly-media-player ${fallbackFullscreen ? "is-fallback-fullscreen" : ""}`}>
-        <header>
-          <div>
-            <span className="sly-media-clean"><i /><ShieldCheck size={12} /> FICHIER VALIDÉ</span>
-            <h2 id="sly-media-player-title">{source.episode.episodeTitle}</h2>
-            <p>{source.episode.seriesTitle} · {source.episode.seasonNumber === null ? "Hors-saison" : `Saison ${source.episode.seasonNumber}`} · {episodeOrdinal(source.episode)}</p>
-          </div>
-          <div className="sly-media-window-actions">
-            <button type="button" onClick={() => void toggleFullscreen()} aria-label={expanded ? "Quitter le plein écran" : "Activer le plein écran"} title={expanded ? "Quitter le plein écran" : "Plein écran"}>{expanded ? <Minimize2 size={18} /> : <Maximize2 size={18} />}</button>
-            <button type="button" onClick={closePlayer} aria-label="Fermer le lecteur" data-player-close><X size={19} /></button>
-          </div>
-        </header>
-
-        <div className={`sly-media-stage ${source.episode.kind}`}>
-          {source.episode.kind === "video" ? <>
-            {/* Les fichiers locaux n’ont pas nécessairement de piste de sous-titres correspondante. */}
-            {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-            <video src={source.url} controls autoPlay playsInline preload="metadata" controlsList="nodownload" aria-label={`Lecture vidéo de ${source.episode.episodeTitle}`} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} onCanPlay={() => setError("")} onError={handlePlaybackError} onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)} onLoadedMetadata={(event) => setDuration(event.currentTarget.duration)} />
-          </> : <div className="sly-media-audio-stage">
-            <div className="sly-media-audio-art"><img src="./slyorus.png" alt="" /><span><Music2 size={26} /></span></div>
-            <div><span>AUDIO LOCAL</span><h3>{source.episode.episodeTitle}</h3><p>{source.episode.fileName}</p></div>
-            {/* Les pistes locales n’ont pas nécessairement de transcription correspondante. */}
-            {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-            <audio src={source.url} controls autoPlay preload="metadata" controlsList="nodownload" aria-label={`Lecture audio de ${source.episode.episodeTitle}`} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} onCanPlay={() => setError("")} onError={handlePlaybackError} onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)} onLoadedMetadata={(event) => setDuration(event.currentTarget.duration)} />
-          </div>}
-          <span className="sly-media-watermark"><img src="./slyorus.png" alt="" /> Slyorent</span>
-        </div>
-
-        <div className="sly-media-native-meta" aria-live="polite">
-          <span className={playing ? "is-playing" : ""}>{source.episode.kind === "audio" ? <Music2 size={14} /> : <Film size={14} />} {source.episode.kind === "audio" ? "Audio" : "Vidéo + audio"} · {playing ? "Lecture" : "Pause"}</span>
-          <span><Clock3 size={14} /> {formatTime(currentTime)} / {formatTime(duration)}</span>
-          <span>{source.audioAdapted ? `Audio ${source.audioCodec || "AAC"} intégré${isFrenchLanguage(source.audioLanguage) ? " · FR" : ""}` : (source.mimeType || source.episode.extension.toUpperCase())} · {formatBytes(source.episode.length)}</span>
-        </div>
-
-        <footer>
-          <div className="sly-media-episode-nav">
-            <button type="button" disabled={!previousEpisode || loadingKey !== null} onClick={() => previousEpisode && void openEpisode(previousEpisode)} aria-label="Épisode précédent"><SkipBack size={17} /><span>Précédent</span></button>
-            <button type="button" disabled={!nextEpisode || loadingKey !== null} onClick={() => nextEpisode && void openEpisode(nextEpisode)} aria-label="Épisode suivant"><span>Suivant</span><SkipForward size={17} /></button>
-          </div>
-          <div className="sly-media-source-meta"><LockKeyhole size={14} /><span>Flux local temporaire · source distante : 0</span></div>
-        </footer>
-        {error && <div className="sly-media-player-error" role="alert">{error}</div>}
-      </div>}
-    </dialog>
+    {selected && <MediaPlayer key={selected.episode.key} episode={selected.episode} initialRecord={selected.record} session={selected.session} getBridge={getBridge} previous={playlist[playlistIndex - 1]} next={playlist[playlistIndex + 1]} onSelect={play} onClose={closePlayer} onProgress={updateProgress} />}
   </section>;
 }
 
-function TorrentCollection({ group, loadingKey, collectionAction, onPlay, onValidate, onOpenDirectory, getBridge }: { group: TorrentMediaGroup; loadingKey: string | null; collectionAction: string | null; onPlay: (event: ReactMouseEvent<HTMLButtonElement>, episode: MediaEpisode) => void; onValidate: () => void; onOpenDirectory: () => void; getBridge: () => MediaBridge }) {
-  const [expanded, setExpanded] = useState(false);
-  const verifyBusy = collectionAction === `validate-${group.torrentId}` || ["verifying", "queued-verification"].includes(group.status);
-  const folderBusy = collectionAction === `folder-${group.torrentId}`;
-  const actionBusy = collectionAction !== null;
-  const torrentComplete = group.percentDone >= .999999;
-  return <article className="sly-media-torrent">
-    <header>
-      <button type="button" className="sly-media-collection-toggle" aria-expanded={expanded} onClick={() => setExpanded((current) => !current)}>
-        <span className="sly-media-torrent-icon"><Library size={18} /></span>
-        <span className="sly-media-collection-copy"><span>TORRENT</span><strong>{group.torrentName}</strong><small>{group.series.length} série{group.series.length > 1 ? "s" : ""} · {group.total} média{group.total > 1 ? "s" : ""}</small></span>
-        <span className="sly-media-ready-count"><ShieldCheck size={13} /> prêts {group.playable}/{group.total}</span>
-        <ChevronDown className="sly-media-collection-chevron" size={17} />
-      </button>
-      <div className="sly-media-collection-actions">
-        <button type="button" disabled={actionBusy || verifyBusy || !torrentComplete} onClick={onValidate} title={torrentComplete ? "Vérifier les pièces puis analyser avec Microsoft Defender" : "Torrent incomplet"}>{verifyBusy ? <LoaderCircle className="sly-media-spin" size={15} /> : <ScanSearch size={15} />}<span>Vérifier et analyser</span></button>
-        <button type="button" disabled={actionBusy} onClick={onOpenDirectory} title="Ouvrir le dossier de ce torrent">{folderBusy ? <LoaderCircle className="sly-media-spin" size={15} /> : <FolderOpen size={15} />}<span>Dossier</span></button>
-      </div>
-    </header>
-    {expanded && <div className="sly-media-series-list">
-      {group.series.map((series) => <details className="sly-media-series" key={series.key}>
-        <summary><span><ChevronDown size={15} /><span><small>SÉRIE / FILM</small><strong>{series.title}</strong></span></span><em>{series.seasons.length} saison{series.seasons.length > 1 ? "s" : ""}</em></summary>
-        <div className="sly-media-seasons">
-          {series.seasons.map((season) => <details className="sly-media-season" key={season.key}>
-            <summary><span><ChevronDown size={15} /><b>{season.label}</b></span><small>{season.episodes.length} épisode{season.episodes.length > 1 ? "s" : ""}</small></summary>
-            <div className="sly-media-episodes">
-              {season.episodes.map((episode) => <article className={`sly-media-episode ${episode.playable ? "is-playable" : "is-locked"}`} key={episode.key}>
-                <span className="sly-media-ordinal">{episodeOrdinal(episode)}</span>
-                <VideoThumbnail episode={episode} getBridge={getBridge} />
-                <div><h4>{episode.episodeTitle}</h4><p title={episode.fileName}>{episode.fileName}</p><span>{formatBytes(episode.length)} · {episode.kind === "audio" ? "Audio" : "Vidéo"} · ratio {formatRatio(episode.uploadRatio)}</span></div>
-                <span className={`sly-media-scan ${episode.playable ? "clean" : "locked"}`}>{episode.playable ? <><ShieldCheck size={12} /> Validé</> : <><LockKeyhole size={12} /> {episode.completed ? "Scan requis" : "Incomplet"}</>}</span>
-                <button type="button" disabled={!episode.playable || loadingKey !== null} onClick={(event) => onPlay(event, episode)} aria-label={`Lire ${episode.episodeTitle}`} title={episode.playable ? `Lire ${episode.episodeTitle}` : "Fichier incomplet ou non validé"}>{loadingKey === episode.key ? <LoaderCircle className="sly-media-spin" size={18} /> : <CirclePlay size={21} />}</button>
-              </article>)}
-            </div>
-          </details>)}
-        </div>
-      </details>)}
-    </div>}
-  </article>;
+export function episodeLabel(episode: MediaEpisode) {
+  const season = episode.seasonNumber === null ? "" : `S${String(episode.seasonNumber).padStart(2, "0")}`;
+  return episode.episodeNumber === null ? episode.kind === "audio" ? "Audio" : "Film" : `${season} E${String(episode.episodeNumber).padStart(2, "0")}`.trim();
 }
 
-export function VideoThumbnail({ episode, getBridge }: VideoThumbnailProps) {
-  const rootRef = useRef<HTMLDivElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const [visible, setVisible] = useState(false);
-  const [sourceUrl, setSourceUrl] = useState("");
-  const [state, setState] = useState<"fallback" | "loading" | "seeking" | "ready" | "error">("fallback");
-
-  useEffect(() => {
-    const element = rootRef.current;
-    if (!element || episode.kind !== "video" || !episode.playable) return;
-    const Observer = globalThis.IntersectionObserver;
-    if (typeof Observer !== "function") {
-      const timer = globalThis.setTimeout(() => setVisible(true), 0);
-      return () => globalThis.clearTimeout(timer);
-    }
-    const observer = new Observer((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) {
-        setVisible(true);
-        observer.disconnect();
-      }
-    }, { rootMargin: "120px", threshold: .05 });
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [episode.kind, episode.playable]);
-
-  useEffect(() => {
-    if (!visible || episode.kind !== "video" || !episode.playable || sourceUrl) return;
-    let cancelled = false;
-    const timer = window.setTimeout(() => setState("loading"), 0);
-    void scheduleThumbnail(() => {
-      if (cancelled) throw new DOMException("Chargement de vignette annulé.", "AbortError");
-      return getBridge().openMedia({ id: episode.torrentId, fileIndex: episode.fileIndex, purpose: "thumbnail" });
-    })
-      .then((result) => {
-        if (cancelled) { if (result?.url?.startsWith("blob:")) URL.revokeObjectURL(result.url); return; }
-        if (!result?.url || !isLocalMediaUrl(result.url)) throw new Error("URL de vignette non locale refusée.");
-        setSourceUrl(result.url);
-      })
-      .catch(() => { if (!cancelled) setState("error"); });
-    return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [episode.fileIndex, episode.kind, episode.playable, episode.torrentId, getBridge, sourceUrl, visible]);
-
-  useEffect(() => () => {
-    const video = videoRef.current;
-    if (video) { video.pause(); video.removeAttribute("src"); video.load(); }
-    if (sourceUrl.startsWith("blob:")) URL.revokeObjectURL(sourceUrl);
-  }, [sourceUrl]);
-
-  function failThumbnail() {
-    const video = videoRef.current;
-    if (video) { video.pause(); video.removeAttribute("src"); video.load(); }
-    setState("error");
-  }
-
-  return <div ref={rootRef} className={`sly-media-thumbnail ${state === "ready" ? "is-ready" : "is-fallback"}`} data-testid="video-thumbnail" aria-hidden="true">
-    {sourceUrl && state !== "error" && <video ref={videoRef} src={sourceUrl} muted playsInline preload="metadata" tabIndex={-1} onLoadedMetadata={(event) => {
-      const video = event.currentTarget;
-      video.pause();
-      const upperBound = Math.max(0, video.duration - .25);
-      const target = Math.min(upperBound, Math.min(45, Math.max(8, video.duration * .1)));
-      if (!Number.isFinite(target) || target < 0) { failThumbnail(); return; }
-      setState("seeking");
-      try { video.currentTime = target; } catch { failThumbnail(); }
-    }} onSeeked={(event) => { event.currentTarget.pause(); setState("ready"); }} onError={failThumbnail} />}
-    <span className="sly-media-thumbnail-fallback">{episode.kind === "audio" ? <Music2 size={19} /> : <Film size={19} />}</span>
-    <span className="sly-media-thumbnail-label">{episode.seasonNumber === null ? episodeOrdinal(episode) : `S${String(episode.seasonNumber).padStart(2, "0")} · ${episodeOrdinal(episode)}`}</span>
-    {state === "loading" || state === "seeking" ? <LoaderCircle className="sly-media-thumbnail-loader sly-media-spin" size={15} /> : null}
-  </div>;
+function WatchProgress({ record }: { record?: WatchRecord }) {
+  const percentage = watchPercentage(record);
+  return <span className={`sly-media-progress ${record?.completed ? "is-complete" : ""}`}>
+    <span><b>{record?.completed ? "Vu" : canResume(record) ? formatMediaTime(record?.position || 0) : "Non vu"}</b><small>{percentage} %</small></span>
+    <span className="sly-media-progress-track" role="progressbar" aria-label="Visionnage" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percentage}><i style={{ width: `${percentage}%` }} /></span>
+  </span>;
 }
-
-export default MediaLibraryView;

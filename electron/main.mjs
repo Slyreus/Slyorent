@@ -11,9 +11,11 @@ import { createDefaultPeerTelemetry } from "./peer-telemetry.mjs";
 import { SharingHistory } from "./sharing-history.mjs";
 import { TorrentService } from "./torrent-service.mjs";
 import { TransmissionManager } from "./transmission-manager.mjs";
+import { WatchHistory } from "./watch-history.mjs";
+import { TorrentOpenQueue } from "./torrent-open-queue.mjs";
 
 const IPC_CHANNEL = "secutorrent:rpc";
-const PRODUCT_NAME = "Slyorent";
+const PRODUCT_NAME = "Slyorrent";
 const LEGACY_USER_DATA_DIRECTORY = "SecuTorrent Slyorus";
 const MAX_REQUESTS_PER_MINUTE = 600;
 const SHARING_MAINTENANCE_INTERVAL_MS = 60_000;
@@ -90,7 +92,7 @@ function errorEnvelope(id, error) {
   return { jsonrpc: "2.0", id, error: { code: safeCode, message: safeMessage } };
 }
 
-function registerIpc({ mainWindow, renderer, service, manager, audit, sharingHistory }) {
+function registerIpc({ mainWindow, renderer, service, manager, audit, sharingHistory, watchHistory, mediaVault, openQueue }) {
   const allowRequest = createRateLimiter();
   const destinationCapabilities = new Map();
   const pruneDestinationCapabilities = () => {
@@ -141,6 +143,12 @@ function registerIpc({ mainWindow, renderer, service, manager, audit, sharingHis
     ["inspectMagnet", async ({ magnet }) => service.inspectMagnet(magnet)],
     ["addMagnet", async (params, event) => service.addMagnet({ ...params, destination: await destinationFromRequest(params, event) })],
     ["importTorrent", async (params, event) => {
+      if (params.rightsConfirmed !== true || params.startPaused !== true) throw new Error("Confirmez les droits et l’import en pause.");
+      if (params.pendingToken !== undefined) {
+        const destination = await destinationFromRequest(params, event);
+        const filePath = await openQueue.take(params.pendingToken);
+        return service.importTorrentFile(filePath, { ...params, destination });
+      }
       const selection = await dialog.showOpenDialog(BrowserWindow.fromWebContents(event.sender), {
         title: "Importer un fichier torrent autorisé",
         buttonLabel: "Inspecter en pause",
@@ -150,6 +158,8 @@ function registerIpc({ mainWindow, renderer, service, manager, audit, sharingHis
       if (selection.canceled || selection.filePaths.length !== 1) return { ok: false, canceled: true };
       return service.importTorrentFile(selection.filePaths[0], { ...params, destination: await destinationFromRequest(params, event) });
     }],
+    ["pendingTorrentImports", async () => openQueue.snapshot()],
+    ["dismissTorrentImport", async ({ token }) => openQueue.dismiss(token)],
     ["chooseTorrentDestination", async (_params, event) => {
       const selection = await dialog.showOpenDialog(mainWindow, {
         title: "Destination dans la bibliothèque",
@@ -190,6 +200,18 @@ function registerIpc({ mainWindow, renderer, service, manager, audit, sharingHis
     ["remove", async (params) => service.remove(params)],
     ["setSeedPolicy", async (params) => service.setSeedPolicy(params)],
     ["openMedia", async (params, event) => service.openMedia(params, event.sender.id)],
+    ["renewMedia", async ({ url }, event) => mediaVault.renew(url, event.sender.id)],
+    ["releaseMedia", async ({ url }, event) => mediaVault.release(url, event.sender.id)],
+    ["cancelMediaPreparation", async ({ requestId }, event) => service.cancelMediaPreparation(requestId, event.sender.id)],
+    ["watchHistory", async () => watchHistory.snapshot()],
+    ["savePlayback", async (params) => {
+      const reference = await service.mediaReference(params);
+      return watchHistory.update(reference.hash, reference.fileIndex, params);
+    }],
+    ["setMediaWatched", async (params) => {
+      const reference = await service.mediaReference(params);
+      return watchHistory.mark(reference.hash, reference.fileIndex, params.watched);
+    }],
     ["audit", async ({ limit }) => audit.recent(limit)],
   ]);
 
@@ -274,7 +296,8 @@ async function bootstrap() {
     audit,
   }).initialize();
   const mediaVault = new MediaVault();
-  const mediaAdapter = await new MediaAdapter({ cacheDirectory: path.join(app.getPath("userData"), "media-cache") }).initialize();
+  const watchHistory = await new WatchHistory(path.join(app.getPath("userData"), "watch-history.json")).initialize();
+  const mediaAdapter = await new MediaAdapter({ cacheDirectory: path.join(app.getPath("userData"), "media-cache"), isFileInUse: (filePath) => mediaVault.isFileInUse(filePath) }).initialize();
   const peerTelemetry = await createDefaultPeerTelemetry({ databasePath: path.join(app.getAppPath(), ".runtime", "geoip", "GeoLite2-City.mmdb") });
   const contentRegistry = new ContentRegistry(path.join(app.getPath("userData"), "content-security"));
   const service = new TorrentService({ manager, audit, mediaVault, mediaAdapter, peerTelemetry, contentRegistry });
@@ -284,6 +307,7 @@ async function bootstrap() {
   let validationMaintenanceInFlight = null;
 
   const stopSharingMaintenance = async () => {
+    await watchHistory.flush();
     if (sharingMaintenanceTimer !== null) {
       clearInterval(sharingMaintenanceTimer);
       sharingMaintenanceTimer = null;
@@ -368,7 +392,9 @@ async function bootstrap() {
   });
   mainWindow.webContents.session.protocol.handle("secutorrent-media", (request) => mediaVault.handle(request));
   lockRendererSession(mainWindow, renderer, mediaVault);
-  registerIpc({ mainWindow, renderer, service, manager, audit, sharingHistory });
+  registerIpc({ mainWindow, renderer, service, manager, audit, sharingHistory, watchHistory, mediaVault, openQueue });
+  const mediaOwnerId = mainWindow.webContents.id;
+  mainWindow.on("closed", () => service.cancelMediaOwner(mediaOwnerId));
 
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   mainWindow.webContents.on("will-navigate", (event, destination) => {
@@ -400,18 +426,30 @@ app.setPath("userData", path.join(app.getPath("appData"), LEGACY_USER_DATA_DIREC
 const hasLock = app.requestSingleInstanceLock();
 let runtime = null;
 let shutdownStarted = false;
+const openQueue = new TorrentOpenQueue({ onChange: () => {
+  const window = runtime?.mainWindow;
+  if (window && !window.isDestroyed()) window.webContents.send("secutorrent:pending-imports");
+} });
+async function queueTorrentFiles(argv) {
+  const result = await openQueue.enqueue(argv);
+  if (result.rejected) dialog.showErrorBox("Fichier .torrent refusé", "Fichier local invalide, inaccessible, trop volumineux ou file d’attente pleine.");
+}
 
 if (!hasLock) {
   app.quit();
 } else {
-  app.on("second-instance", () => {
+  app.on("second-instance", (_event, argv) => {
+    void queueTorrentFiles(argv).catch(() => undefined);
     const window = runtime?.mainWindow;
     if (!window || window.isDestroyed()) return;
     if (window.isMinimized()) window.restore();
     window.focus();
   });
+  app.on("open-file", (event, filePath) => { event.preventDefault(); void queueTorrentFiles([filePath]).catch(() => undefined); });
   app.whenReady().then(async () => {
+    await queueTorrentFiles(process.argv);
     runtime = await bootstrap();
+    if (openQueue.snapshot().length) runtime.mainWindow.webContents.send("secutorrent:pending-imports");
   }).catch((error) => {
     dialog.showErrorBox(`${PRODUCT_NAME} n'a pas démarré`, String(error?.message || error));
     app.exit(1);

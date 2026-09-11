@@ -1,6 +1,13 @@
 export {};
 
 declare global {
+  interface SecuTorrentWatchRecord {
+    position: number;
+    duration: number;
+    completed: boolean;
+    updatedAt: number;
+  }
+  type SecuTorrentWatchHistory = Record<string, SecuTorrentWatchRecord>;
   type SecuTorrentScanStatus = "not-scanned" | "scanning" | "clean" | "blocked" | "stale";
   interface SecuTorrentFile {
     index: number;
@@ -247,7 +254,10 @@ declare global {
       locateSelf(): Promise<SecuTorrentLocatedSelf>;
       inspectMagnet(magnet: string): Promise<{ valid: boolean; verdict: "clean" | "review" | "blocked"; score: number; name: string; hash: string | null; trackers: string[]; issues: string[]; warnings: string[] }>;
       addMagnet(options: { magnet: string; rightsConfirmed: true; startPaused: true; destinationToken?: string; createSubfolder: boolean }): Promise<{ ok: true; torrent: SecuTorrentTorrent }>;
-      importTorrent(options: { rightsConfirmed: true; startPaused: true; destinationToken?: string; createSubfolder: boolean }): Promise<{ ok: boolean; canceled?: boolean; torrent?: SecuTorrentTorrent }>;
+      importTorrent(options: { rightsConfirmed: true; startPaused: true; destinationToken?: string; createSubfolder: boolean; pendingToken?: string }): Promise<{ ok: boolean; canceled?: boolean; torrent?: SecuTorrentTorrent }>;
+      pendingTorrentImports(): Promise<{ token: string; name: string; size: number }[]>;
+      dismissTorrentImport(token: string): Promise<{ ok: true }>;
+      onPendingTorrentImports(callback: () => void): () => void;
       chooseTorrentDestination(): Promise<{ ok: boolean; canceled?: boolean; token?: string; directory?: string }>;
       chooseDownloadDirectory(): Promise<{ ok: boolean; canceled?: boolean; changed?: boolean; directory?: string; appliesTo?: "new-torrents" }>;
       openDownloadDirectory(): Promise<{ ok: true }>;
@@ -257,7 +267,13 @@ declare global {
       verifyAndScan(id: number): Promise<{ ok: true; clean: true; resumed: boolean; filesScanned: number; signatureUpdatedAt: string; torrent: SecuTorrentTorrent }>;
       remove(options: { id: number; deleteData: boolean }): Promise<{ ok: true }>;
       setSeedPolicy(options: { id: number; ratioLimit: number | null; idleMinutes: number | null; uploadLimitKbps: number | null }): Promise<{ ok: true; torrent: SecuTorrentTorrent }>;
-      openMedia(options: { id: number; fileIndex: number; purpose?: "playback" | "thumbnail" }): Promise<{ url: string; expiresAt: string; mimeType: string; name: string; audioAdapted: boolean; audioCodec: string | null; audioLanguage: string | null }>;
+      openMedia(options: { id: number; fileIndex: number; purpose?: "playback" | "thumbnail"; requestId?: string }): Promise<{ url: string; expiresAt: string; mimeType: string; name: string; audioAdapted: boolean; audioCodec: string | null; audioLanguage: string | null }>;
+      renewMedia(url: string): Promise<{ expiresAt: string }>;
+      releaseMedia(url: string): Promise<{ ok: true }>;
+      cancelMediaPreparation(requestId: string): Promise<{ ok: true }>;
+      watchHistory(): Promise<SecuTorrentWatchHistory>;
+      savePlayback(options: { id: number; fileIndex: number; position: number; duration: number; completed: boolean }): Promise<SecuTorrentWatchRecord & { key: string }>;
+      setMediaWatched(options: { id: number; fileIndex: number; watched: boolean }): Promise<SecuTorrentWatchRecord & { key: string }>;
       audit(limit?: number): Promise<SecuTorrentAuditEntry[]>;
     }>;
   }

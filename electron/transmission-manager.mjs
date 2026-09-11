@@ -190,7 +190,7 @@ export class TransmissionManager {
     const internalData = await realpath(this.paths.data);
     const overlapsUserData = containsPath(this.#userDataPath, canonical) || containsPath(canonical, this.#userDataPath);
     if (overlapsUserData && !containsPath(internalData, canonical)) {
-      throw new Error("Ce dossier interne est réservé au profil sécurisé de Slyorent.");
+      throw new Error("Ce dossier interne est réservé au profil sécurisé de Slyorrent.");
     }
     return canonical;
   }
@@ -202,7 +202,7 @@ export class TransmissionManager {
       await writeFile(probe, "", { encoding: "utf8", mode: 0o600, flag: "wx" });
       created = true;
     } catch {
-      throw new Error("Slyorent ne peut pas écrire dans le dossier choisi.");
+      throw new Error("Slyorrent ne peut pas écrire dans le dossier choisi.");
     } finally {
       if (created) await unlink(probe).catch(() => undefined);
     }
@@ -304,7 +304,7 @@ export class TransmissionManager {
   async resolveAllowedDownloadRoot(directory) {
     const canonical = await this.#canonicalDownloadDirectory(directory);
     const root = [...this.#allowedDownloadDirectories.values()].find((candidate) => containsPath(candidate, canonical));
-    if (!root) throw new Error("Le torrent référence un répertoire qui n'a pas été autorisé par Slyorent.");
+    if (!root) throw new Error("Le torrent référence un répertoire qui n'a pas été autorisé par Slyorrent.");
     return root;
   }
 

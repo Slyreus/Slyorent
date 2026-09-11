@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildMediaLibrary,
+  buildPlaybackQueue,
   flattenPlayableSeries,
   parseMediaIdentity,
 } from "../lib/media-library.ts";
@@ -166,4 +167,34 @@ test("n'autorise que les fichiers complets, voulus, média et marqués clean", (
   assert.equal(episodes[0].uploadRatio, 1.25);
   assert.deepEqual(flattenPlayableSeries(library[0], library[0].series[0].key).map((episode) => episode.fileIndex), [0]);
   assert.deepEqual(flattenPlayableSeries(library[0], "clé-inconnue"), []);
+});
+
+test("retrouver le suivi par infohash même si le moteur change l'identifiant du torrent", () => {
+  const original = { ...torrent(1, "Collection", [mediaFile(0, "Show.S01E01.mkv")]), hash: "a".repeat(40) };
+  const restarted = { ...original, id: 17 };
+  const left = buildMediaLibrary([original])[0].series[0].seasons[0].episodes[0];
+  const right = buildMediaLibrary([restarted])[0].series[0].seasons[0].episodes[0];
+  assert.equal(left.watchKey, right.watchKey);
+  assert.notEqual(left.key, right.key);
+});
+
+test("ne pas afficher le groupe d'encodage comme titre d'épisode", () => {
+  const parsed = parseMediaIdentity("Show.S01E02.MULTi.1080p.BluRay.x264-RELEASE.mkv", "Show.S01");
+  assert.equal(parsed.episodeTitle, "Épisode 02");
+  assert.equal(parseMediaIdentity("Show.S01E02.Le.voyage.1080p.WEB-DL.x264-RELEASE.mkv", "Show.S01").episodeTitle, "Le Voyage");
+  assert.equal(parseMediaIdentity("Film (2022) VOSTFR 1080p WEB x264 AAC -RELEASE.mkv", "Film (2022) VOSTFR 1080p WEB x264 AAC -RELEASE.mkv").episodeTitle, "Film (2022)");
+});
+
+test("passer à la saison suivante dans un autre torrent sans lire les doublons", () => {
+  const groups = buildMediaLibrary([
+    torrent(1, "Show.S01", [mediaFile(0, "Show.S01E01.mkv"), mediaFile(1, "Show.S01E02.mkv")]),
+    torrent(2, "Show.S02", [mediaFile(0, "Show.S02E01.mkv"), mediaFile(1, "Show.S02E02.mkv", { scanStatus: "not-scanned" })]),
+    torrent(3, "Show.Copie", [mediaFile(0, "Show.S01E02.mkv")]),
+  ]);
+  const episodes = groups.flatMap((group) => group.series.flatMap((series) => series.seasons.flatMap((season) => season.episodes)));
+  const current = episodes.find((episode) => episode.torrentId === 1 && episode.episodeNumber === 2);
+  const queue = buildPlaybackQueue(episodes, current);
+  assert.deepEqual(queue.map((episode) => episode.key), ["1:0", "1:1", "2:0"]);
+  const duplicate = episodes.find((episode) => episode.torrentId === 3);
+  assert.ok(buildPlaybackQueue(episodes, duplicate).some((episode) => episode.key === duplicate.key));
 });

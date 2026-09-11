@@ -1,4 +1,4 @@
-name: Vérifications V1
+name: Vérifier Slyorrent
 
 on:
   push:

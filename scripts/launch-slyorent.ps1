@@ -4,7 +4,7 @@ $workspace = Split-Path -Parent $PSScriptRoot
 $electronPath = Join-Path $workspace "node_modules\electron\dist\electron.exe"
 
 if (-not (Test-Path -LiteralPath $electronPath -PathType Leaf)) {
-    throw "Le moteur Electron de Slyorent est introuvable."
+    throw "Le moteur Electron de Slyorrent est introuvable."
 }
 
 $alreadyRunning = Get-CimInstance Win32_Process -Filter "Name = 'electron.exe'" |

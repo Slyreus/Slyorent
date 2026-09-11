@@ -71,13 +71,13 @@ async function resolveSafeTorrentFile(allowedRoot, downloadDir, torrentFileName)
   if (normalizedSegments.some((segment) => segment === ".." || segment === "")) throw new Error("Chemin de fichier torrent ambigu.");
   const rootReal = await realpath(allowedRoot);
   const directoryReal = await realpath(downloadDir);
-  if (!containsPath(rootReal, directoryReal)) throw new Error("Le torrent pointe hors du stockage Slyorent.");
+  if (!containsPath(rootReal, directoryReal)) throw new Error("Le torrent pointe hors du stockage Slyorrent.");
   const candidate = path.resolve(directoryReal, ...normalizedSegments);
-  if (!containsPath(rootReal, candidate)) throw new Error("Le fichier pointe hors du stockage Slyorent.");
+  if (!containsPath(rootReal, candidate)) throw new Error("Le fichier pointe hors du stockage Slyorrent.");
   const linkInfo = await lstat(candidate);
   if (linkInfo.isSymbolicLink()) throw new Error("Les liens symboliques sont interdits dans les torrents.");
   const fileReal = await realpath(candidate);
-  if (!containsPath(rootReal, fileReal)) throw new Error("Un lien de répertoire sort du stockage Slyorent.");
+  if (!containsPath(rootReal, fileReal)) throw new Error("Un lien de répertoire sort du stockage Slyorrent.");
   return fileReal;
 }
 
@@ -206,6 +206,9 @@ export class TorrentService {
   #mediaVault;
   #mediaAdapter;
   #adaptedScanRecords = new Map();
+  #adaptedScansPending = new Map();
+  #mediaPreparations = new Map();
+  #mediaCancellations = new Map();
   #peerTelemetry;
   #selfLocator;
   #scanRecords = new Map();
@@ -1537,7 +1540,42 @@ export class TorrentService {
     }
   }
 
-  async openMedia({ id, fileIndex, purpose = "playback" }, ownerWebContentsId) {
+  async mediaReference({ id, fileIndex }) {
+    const raw = await this.#rawTorrent(assertTorrentId(id));
+    if (!Number.isInteger(fileIndex) || fileIndex < 0 || fileIndex >= (raw.files?.length || 0) || !isMediaName(raw.files[fileIndex].name)) throw new Error("Référence média invalide.");
+    return { hash: raw.hash_string, fileIndex };
+  }
+
+  #mediaRequestKey(requestId, ownerWebContentsId) {
+    if (typeof requestId !== "string" || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/iu.test(requestId) || !Number.isInteger(ownerWebContentsId) || ownerWebContentsId <= 0) throw new Error("Requête média invalide.");
+    return `${ownerWebContentsId}:${requestId}`;
+  }
+
+  cancelMediaPreparation(requestId, ownerWebContentsId) {
+    const key = this.#mediaRequestKey(requestId, ownerWebContentsId);
+    this.#mediaPreparations.get(key)?.abort();
+    this.#mediaCancellations.set(key, Date.now());
+    for (const [candidate, timestamp] of this.#mediaCancellations) if (timestamp < Date.now() - 60_000) this.#mediaCancellations.delete(candidate);
+    while (this.#mediaCancellations.size > 256) this.#mediaCancellations.delete(this.#mediaCancellations.keys().next().value);
+    return { ok: true };
+  }
+
+  cancelMediaOwner(ownerWebContentsId) {
+    for (const [key, controller] of this.#mediaPreparations) if (key.startsWith(`${ownerWebContentsId}:`)) controller.abort();
+  }
+
+  async openMedia({ requestId = randomUUID(), ...options }, ownerWebContentsId) {
+    const key = this.#mediaRequestKey(requestId, ownerWebContentsId);
+    if (this.#mediaPreparations.has(key)) throw new Error("Requête média déjà en cours.");
+    const controller = new AbortController();
+    if ((this.#mediaCancellations.get(key) || 0) > Date.now() - 60_000) controller.abort();
+    this.#mediaPreparations.set(key, controller);
+    try { return await this.#openMedia(options, ownerWebContentsId, controller.signal); }
+    finally { this.#mediaPreparations.delete(key); }
+  }
+
+  async #openMedia({ id, fileIndex, purpose = "playback" }, ownerWebContentsId, signal) {
+    signal.throwIfAborted();
     const raw = await this.#rawTorrent(assertTorrentId(id));
     if (this.#isSharingProtected(raw)) throw new Error("Le média est bloqué pendant le contrôle de sécurité.");
     if (!new Set(["playback", "thumbnail"]).has(purpose)) throw new Error("Usage du flux média invalide.");
@@ -1564,13 +1602,20 @@ export class TorrentService {
     let audioLanguage = null;
     if (purpose === "playback" && this.#mediaAdapter && mimeType === "video/x-matroska") {
       await this.#audit.append("media.audio_adaptation_started", { torrentId: id, fileIndex });
-      const adapted = await this.#mediaAdapter.prepare({ sourcePath: filePath, sourceSize: record.size, sourceMtimeMs: record.mtimeMs });
+      const adapted = await this.#mediaAdapter.prepare({ sourcePath: filePath, sourceSize: record.size, sourceMtimeMs: record.mtimeMs, signal });
+      signal.throwIfAborted();
       if (adapted) {
         const adaptedScan = this.#adaptedScanRecords.get(adapted.filePath);
         if (!adaptedScan || adaptedScan.size !== adapted.size || adaptedScan.mtimeMs !== adapted.mtimeMs) {
-          const clean = await this.#scanFile(adapted.filePath);
-          if (clean.size !== adapted.size || clean.mtimeMs !== adapted.mtimeMs) throw new Error("La version audio compatible a changé pendant son analyse.");
-          this.#adaptedScanRecords.set(adapted.filePath, { size: clean.size, mtimeMs: clean.mtimeMs });
+          const scanKey = JSON.stringify([adapted.filePath, adapted.size, adapted.mtimeMs]);
+          if (!this.#adaptedScansPending.has(scanKey)) {
+            const task = this.#scanFile(adapted.filePath).then((clean) => {
+              if (clean.size !== adapted.size || clean.mtimeMs !== adapted.mtimeMs) throw new Error("La version audio compatible a changé pendant son analyse.");
+              this.#adaptedScanRecords.set(adapted.filePath, { size: clean.size, mtimeMs: clean.mtimeMs });
+            }).finally(() => this.#adaptedScansPending.delete(scanKey));
+            this.#adaptedScansPending.set(scanKey, task);
+          }
+          await this.#adaptedScansPending.get(scanKey);
         }
         servedPath = adapted.filePath;
         servedSize = adapted.size;
@@ -1582,6 +1627,9 @@ export class TorrentService {
         await this.#audit.append("media.audio_adaptation_ready", { torrentId: id, fileIndex, cacheHit: adapted.cacheHit, audioCodec, audioLanguage });
       }
     }
+    const sourceAfter = await stat(filePath);
+    signal.throwIfAborted();
+    if (this.#scanRecords.get(key) !== record || sourceAfter.size !== record.size || sourceAfter.mtimeMs !== record.mtimeMs) throw new Error("La validation du média a changé pendant son ouverture.");
     const issued = this.#mediaVault.issue({
       filePath: servedPath,
       torrentKey: raw.hash_string,

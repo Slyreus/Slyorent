@@ -1,0 +1,16 @@
+import type { MapPoint, MapViewport, NormalizedLocalNode, NormalizedStrategicPeer } from "./strategic-peer-map-model.mjs";
+export const MAX_ANIMATED_ROUTES: 64;
+export const SNAPSHOT_FRESHNESS_MS: 8000;
+export type PeerCity = { key: string; point: MapPoint; name: string; country: string | null; peers: NormalizedStrategicPeer[]; active: number; upload: number; download: number };
+export type FlowCurve = { from: MapPoint; control: MapPoint; to: MapPoint; path: string };
+export type MapRoute = { key: string; cityKey: string; kind: "upload" | "download"; rate: number; strength: number; curve: FlowCurve; seed: number; duration: number; pulses: number };
+export function isSnapshotFresh(capturedAt: unknown, now: number): boolean;
+export function groupPeerCities(peers: readonly NormalizedStrategicPeer[]): PeerCity[];
+export function signalStrength(rate: number): number;
+export function createFlowCurve(local: MapPoint, remote: MapPoint, kind: "upload" | "download"): FlowCurve;
+export function pointOnCurve(curve: FlowCurve, progress: number): MapPoint;
+export function buildMapRoutes(cities: readonly PeerCity[], local: NormalizedLocalNode | null, fresh: boolean): { routes: MapRoute[]; total: number };
+export function sampleRoute(route: MapRoute, seconds: number): { type: "flight" | "impact"; progress: number }[];
+export function fitMap(width: number, height: number): { scale: number; x: number; y: number };
+export function clientToMap(bounds: { width: number; height: number; left: number; top: number }, clientX: number, clientY: number): MapPoint;
+export function cityLabelKeys(cities: readonly PeerCity[], viewport: MapViewport, selectedKey: string | null, localPoint?: MapPoint): Set<string>;

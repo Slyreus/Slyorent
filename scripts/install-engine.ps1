@@ -259,7 +259,7 @@ try {
         $runningTransmission = @(Get-Process -Name 'transmission-*' -ErrorAction SilentlyContinue)
         if ($runningTransmission.Count -gt 0) {
             $processIds = ($runningTransmission.Id | Sort-Object) -join ', '
-            throw "Fermez Slyorent et Transmission avant de remplacer le moteur (PID : $processIds)."
+            throw "Fermez Slyorrent et Transmission avant de remplacer le moteur (PID : $processIds)."
         }
         Assert-PathInsideRuntime -Path $EngineRoot
         Assert-NoReparsePointInsideRuntime -Path $EngineRoot

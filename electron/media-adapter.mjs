@@ -6,6 +6,7 @@ import { lstat, mkdir, readdir, realpath, rename, stat, statfs, unlink } from "n
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { canonicalPathWithoutLinks, UnsafePathError } from "./safe-path.mjs";
+import { SharedPreparations } from "./shared-preparation.mjs";
 
 const FFMPEG_SHA256 = "04e1307997530f9cf2fe35cba2ca7e8875ca91da02f89d6c7243df819c94ad00";
 const FFPROBE_SHA256 = "3a7e2dc003dc2cd1472827e4c7c4f056ae1ae0ae7c5bbc580c99b49827351ba4";
@@ -52,7 +53,8 @@ async function verifiedBinary(candidate, expectedHash, label) {
   return resolved;
 }
 
-function runProcess(executable, args, { timeoutMs, maxStdout = 0, maxStderr = MAX_DIAGNOSTIC_OUTPUT } = {}) {
+function runProcess(executable, args, { timeoutMs, maxStdout = 0, maxStderr = MAX_DIAGNOSTIC_OUTPUT, signal } = {}) {
+  signal?.throwIfAborted();
   return new Promise((resolve, reject) => {
     const child = spawn(executable, args, {
       windowsHide: true,
@@ -71,18 +73,23 @@ function runProcess(executable, args, { timeoutMs, maxStdout = 0, maxStderr = MA
     };
     child.stdout.on("data", (chunk) => { stdout = append(stdout, chunk, maxStdout); });
     child.stderr.on("data", (chunk) => { stderr = append(stderr, chunk, maxStderr); });
+    let stoppedBy = null;
+    const abort = () => { stoppedBy = signal.reason; child.kill(); };
+    signal?.addEventListener("abort", abort, { once: true });
     const timer = setTimeout(() => {
+      stoppedBy = Object.assign(new Error("La préparation du média local a dépassé le délai autorisé."), { code: "MEDIA_ADAPT_TIMEOUT" });
       child.kill();
-      reject(Object.assign(new Error("La préparation du média local a dépassé le délai autorisé."), { code: "MEDIA_ADAPT_TIMEOUT" }));
     }, timeoutMs);
+    const cleanup = () => { clearTimeout(timer); signal?.removeEventListener("abort", abort); };
     child.once("error", (error) => {
-      clearTimeout(timer);
+      cleanup();
       reject(Object.assign(new Error("Le moteur média local n'a pas pu démarrer."), { code: "MEDIA_ADAPT_START_FAILED", cause: error }));
     });
-    child.once("exit", (code, signal) => {
-      clearTimeout(timer);
-      if (code === 0 && !overflow) resolve({ stdout, stderr });
-      else reject(Object.assign(new Error(`Le moteur média local a refusé le fichier (${code ?? signal ?? "inconnu"}).`), {
+    child.once("close", (code, exitSignal) => {
+      cleanup();
+      if (stoppedBy) reject(stoppedBy);
+      else if (code === 0 && !overflow) resolve({ stdout, stderr });
+      else reject(Object.assign(new Error(`Le moteur média local a refusé le fichier (${code ?? exitSignal ?? "inconnu"}).`), {
         code: overflow ? "MEDIA_ADAPT_OUTPUT_LIMIT" : "MEDIA_ADAPT_FAILED",
       }));
     });
@@ -130,10 +137,15 @@ export class MediaAdapter {
   #cacheDirectory;
   #ffmpeg = null;
   #ffprobe = null;
-  #pending = new Map();
+  #pending = new SharedPreparations();
+  #analyses = new Map();
+  #conversionTail = Promise.resolve();
+  #protectedUntil = new Map();
+  #isFileInUse;
 
-  constructor({ cacheDirectory }) {
+  constructor({ cacheDirectory, isFileInUse = () => false }) {
     this.#cacheDirectory = path.resolve(cacheDirectory);
+    this.#isFileInUse = isFileInUse;
   }
 
   async initialize() {
@@ -176,17 +188,27 @@ export class MediaAdapter {
     let total = entries.reduce((sum, entry) => sum + entry.size, 0);
     for (const entry of entries.sort((left, right) => left.mtimeMs - right.mtimeMs)) {
       if (total + reservedBytes <= MAX_CACHE_BYTES) break;
+      if (this.#isFileInUse(entry.candidate) || (this.#protectedUntil.get(entry.candidate) || 0) > Date.now()) continue;
       await unlink(entry.candidate).catch(() => undefined);
       total -= entry.size;
     }
+    for (const [candidate, until] of this.#protectedUntil) if (until <= Date.now()) this.#protectedUntil.delete(candidate);
   }
 
-  async prepare({ sourcePath, sourceSize, sourceMtimeMs }) {
+  async prepare({ sourcePath, sourceSize, sourceMtimeMs, signal }) {
+    signal?.throwIfAborted();
     if (!this.#ffmpeg || !this.#ffprobe) throw new Error("Le moteur média local n'est pas initialisé.");
     const resolvedSource = await realpath(sourcePath);
     const sourceInfo = await stat(resolvedSource);
     if (!sourceInfo.isFile() || sourceInfo.size !== sourceSize || sourceInfo.mtimeMs !== sourceMtimeMs) throw new Error("Le média a changé avant sa préparation audio.");
-    const analysis = analyzeProbe(await this.#probe(resolvedSource));
+    const probeKey = JSON.stringify([resolvedSource, sourceSize, sourceMtimeMs]);
+    if (!this.#analyses.has(probeKey)) {
+      const probe = this.#probe(resolvedSource).then(analyzeProbe).catch((error) => { this.#analyses.delete(probeKey); throw error; });
+      this.#analyses.set(probeKey, probe);
+      while (this.#analyses.size > 128) this.#analyses.delete(this.#analyses.keys().next().value);
+    }
+    const analysis = await this.#analyses.get(probeKey);
+    signal?.throwIfAborted();
     if (!analysis.needsAdaptation) return null;
     if (!MP4_COPY_VIDEO_CODECS.has(String(analysis.video.codec_name || "").toLowerCase())) {
       throw Object.assign(new Error(`Le son ${String(analysis.audio.codec_name || "").toUpperCase()} est détecté, mais la vidéo ${String(analysis.video.codec_name || "").toUpperCase()} ne peut pas être adaptée sans réencodage complet.`), { code: "MEDIA_VIDEO_CODEC_UNSUPPORTED" });
@@ -200,20 +222,23 @@ export class MediaAdapter {
     });
     const outputPath = path.join(this.#cacheDirectory, `${key}.mp4`);
     if (!containsPath(this.#cacheDirectory, outputPath)) throw new Error("Chemin de cache média invalide.");
-    if (this.#pending.has(key)) return this.#pending.get(key);
-    const task = this.#prepareOnce({
+    return this.#pending.run(key, signal, (sharedSignal) => this.#prepareOnce({
       resolvedSource,
       outputPath,
       sourceSize,
       sourceMtimeMs,
       video: analysis.video,
       audio: analysis.audio,
-    }).finally(() => this.#pending.delete(key));
-    this.#pending.set(key, task);
-    return task;
+      signal: sharedSignal,
+    }).then((result) => {
+      // Protéger aussi le fichier pendant l'analyse Defender, avant l'émission du jeton.
+      this.#protectedUntil.set(result.filePath, Date.now() + 10 * 60_000);
+      return result;
+    }));
   }
 
-  async #prepareOnce({ resolvedSource, outputPath, sourceSize, sourceMtimeMs, video, audio }) {
+  async #prepareOnce({ resolvedSource, outputPath, sourceSize, sourceMtimeMs, video, audio, signal }) {
+    signal.throwIfAborted();
     const cached = await lstat(outputPath).catch(() => null);
     if (cached) {
       if (!cached.isFile() || cached.isSymbolicLink() || cached.size <= 0) throw new Error("Le cache audio local est invalide.");
@@ -229,6 +254,13 @@ export class MediaAdapter {
       };
     }
 
+    const task = this.#conversionTail.then(() => this.#convert({ resolvedSource, outputPath, sourceSize, sourceMtimeMs, video, audio, signal }));
+    this.#conversionTail = task.catch(() => undefined);
+    return task;
+  }
+
+  async #convert({ resolvedSource, outputPath, sourceSize, sourceMtimeMs, video, audio, signal }) {
+    signal.throwIfAborted();
     await this.#pruneCache(outputPath, sourceSize);
     const disk = await statfs(this.#cacheDirectory);
     const freeBytes = Number(disk.bavail) * Number(disk.bsize);
@@ -251,7 +283,8 @@ export class MediaAdapter {
         "-movflags", "+faststart",
         "-f", "mp4",
         tempPath,
-      ], { timeoutMs: 60 * 60_000, maxStdout: 0 });
+      ], { timeoutMs: 60 * 60_000, maxStdout: 0, signal });
+      signal.throwIfAborted();
       const sourceAfter = await stat(resolvedSource);
       if (sourceAfter.size !== sourceSize || sourceAfter.mtimeMs !== sourceMtimeMs) throw new Error("Le média source a changé pendant sa préparation audio.");
       const tempInfo = await lstat(tempPath);

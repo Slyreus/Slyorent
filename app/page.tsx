@@ -27,7 +27,7 @@ type DestinationResult = { ok: boolean; canceled?: boolean; token?: string; dire
 type UiBridge = Omit<NonNullable<Window["secuTorrent"]>, "addMagnet" | "importTorrent"> & {
   chooseTorrentDestination(): Promise<DestinationResult>;
   addMagnet(options: { magnet: string; rightsConfirmed: true; startPaused: true; destinationToken?: string; createSubfolder: boolean }): ReturnType<NonNullable<Window["secuTorrent"]>["addMagnet"]>;
-  importTorrent(options: { rightsConfirmed: true; startPaused: true; destinationToken?: string; createSubfolder: boolean }): ReturnType<NonNullable<Window["secuTorrent"]>["importTorrent"]>;
+  importTorrent(options: { rightsConfirmed: true; startPaused: true; destinationToken?: string; createSubfolder: boolean; pendingToken?: string }): ReturnType<NonNullable<Window["secuTorrent"]>["importTorrent"]>;
 };
 
 const DEFAULT_TORRENT_DESTINATION: TorrentDestination = { token: null, directory: null, createSubfolder: true };
@@ -104,7 +104,7 @@ function readableError(error: unknown) {
 }
 
 function getBridge(): UiBridge {
-  if (typeof window === "undefined" || !window.secuTorrent) throw new Error("Interface locale indisponible. Ouvrez Slyorent.");
+  if (typeof window === "undefined" || !window.secuTorrent) throw new Error("Interface locale indisponible. Ouvrez Slyorrent.");
   return window.secuTorrent as unknown as UiBridge;
 }
 
@@ -122,7 +122,7 @@ function DestinationControl({ id, destination, defaultDirectory, busy, disabled,
   onChoose: () => void;
   onSubfolderChange: (checked: boolean) => void;
 }) {
-  const directory = destination.directory || defaultDirectory || "Dossier local géré par Slyorent";
+  const directory = destination.directory || defaultDirectory || "Dossier local géré par Slyorrent";
   return <section className="torrent-destination" aria-labelledby={`${id}-destination-title`}>
     <div className="torrent-destination-main">
       <span className="torrent-destination-icon"><FolderOpen size={16} /></span>
@@ -222,6 +222,7 @@ export default function Home() {
   const [torrents, setTorrents] = useState<SecuTorrentTorrent[]>([]);
   const [auditEntries, setAuditEntries] = useState<UiAuditEntry[]>([]);
   const [peerSnapshot, setPeerSnapshot] = useState<SecuTorrentPeerSnapshot | null>(null);
+  const peerSnapshotInFlight = useRef(false);
   const [mapError, setMapError] = useState("");
   const [localNode, setLocalNode] = useState<StrategicLocalNode | null>(null);
   const [locating, setLocating] = useState(false);
@@ -237,6 +238,7 @@ export default function Home() {
   const [engineInspection, setEngineInspection] = useState<EngineInspection | null>(null);
   const [rightsConfirmed, setRightsConfirmed] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [externalImport, setExternalImport] = useState<{ token: string; name: string; size: number } | null>(null);
   const [importRights, setImportRights] = useState(false);
   const [magnetDestination, setMagnetDestination] = useState<TorrentDestination>(DEFAULT_TORRENT_DESTINATION);
   const [importDestination, setImportDestination] = useState<TorrentDestination>(DEFAULT_TORRENT_DESTINATION);
@@ -252,6 +254,31 @@ export default function Home() {
   const previousFocus = useRef<HTMLElement | null>(null);
 
   const notify = useCallback((tone: Notice["tone"], message: string) => setNotice({ tone, message }), []);
+  const closeImport = useCallback(async () => {
+    if (externalImport) {
+      try { await getBridge().dismissTorrentImport(externalImport.token); }
+      catch (error) { notify("error", readableError(error)); return; }
+    }
+    setImportOpen(false); setExternalImport(null); setImportRights(false);
+    setImportDestination({ ...DEFAULT_TORRENT_DESTINATION });
+  }, [externalImport, notify]);
+
+  useEffect(() => {
+    let disposed = false;
+    const api = window.secuTorrent;
+    if (!api?.pendingTorrentImports || !api.onPendingTorrentImports) return;
+    const refreshPending = async () => {
+      try {
+        const pending = await api.pendingTorrentImports();
+        if (disposed || importOpen || externalImport || busy || policyTarget || globalPolicyOpen || !pending.length) return;
+        setExternalImport(pending[0]); setImportOpen(true); setImportRights(false);
+        setImportDestination({ ...DEFAULT_TORRENT_DESTINATION }); setActiveView("add");
+      } catch { /* Le prochain événement ou remontage relira la file locale. */ }
+    };
+    const unsubscribe = api.onPendingTorrentImports(() => void refreshPending());
+    void refreshPending();
+    return () => { disposed = true; unsubscribe(); };
+  }, [importOpen, externalImport, busy, policyTarget, globalPolicyOpen]);
 
   const refresh = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -289,12 +316,16 @@ export default function Home() {
   }, [activeView, loadAudit]);
 
   const refreshPeerSnapshot = useCallback(async () => {
+    if (peerSnapshotInFlight.current) return;
+    peerSnapshotInFlight.current = true;
     try {
       const nextSnapshot = await getBridge().peerSnapshot();
       setPeerSnapshot(nextSnapshot);
       setMapError("");
     } catch (error) {
       setMapError(readableError(error));
+    } finally {
+      peerSnapshotInFlight.current = false;
     }
   }, []);
 
@@ -336,13 +367,13 @@ export default function Home() {
     const onKey = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") { event.preventDefault(); searchRef.current?.focus(); }
       if (event.key === "Escape") {
-        setImportOpen(false); setImportRights(false); setImportDestination({ ...DEFAULT_TORRENT_DESTINATION });
+        if (importOpen && busy !== "import") void closeImport();
         setPolicyTarget(null); setGlobalPolicyOpen(false);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [importOpen, busy, closeImport]);
 
   const modalOpen = importOpen || Boolean(policyTarget) || globalPolicyOpen;
   useEffect(() => {
@@ -417,12 +448,6 @@ export default function Home() {
     }
   }
 
-  function closeImport() {
-    setImportOpen(false);
-    setImportRights(false);
-    resetImportDestination();
-  }
-
   async function analyzeMagnet(event: FormEvent) {
     event.preventDefault(); setEngineInspection(null);
     const local = inspectMagnet(magnet);
@@ -457,6 +482,7 @@ export default function Home() {
     try {
       const result = await getBridge().importTorrent({
         rightsConfirmed: true, startPaused: true,
+        ...(externalImport ? { pendingToken: externalImport.token } : {}),
         ...(importDestination.token ? { destinationToken: importDestination.token } : {}),
         createSubfolder: importDestination.createSubfolder,
       });
@@ -464,7 +490,7 @@ export default function Home() {
       else { notify("success", "Fichier .torrent importé en pause."); setActiveView("transfers"); }
       await refresh(true);
     } catch (error) { notify("error", readableError(error)); }
-    finally { setBusy(null); closeImport(); }
+    finally { await closeImport(); setBusy(null); }
   }
 
   async function requestMapLocation() {
@@ -581,13 +607,13 @@ export default function Home() {
   return <div className="secu-shell">
     <a className="skip-link" href="#main-content">Aller au contenu</a>
     <aside className="sidebar">
-      <button className="brand" type="button" onClick={() => setActiveView("dashboard")} aria-label="Slyorent, accueil"><span className="brand-mark"><img src="./slyorus.png" alt="" /></span><span><strong>Slyorent</strong><small>Protection Slyorus</small></span></button>
+      <button className="brand" type="button" onClick={() => setActiveView("dashboard")} aria-label="Slyorrent, accueil"><span className="brand-mark"><img src="./slyorus.png" alt="" /></span><span><strong>Slyorrent</strong><small>Protection Slyorus</small></span></button>
       <nav aria-label="Navigation principale">{navItems.map((item) => { const Icon = item.icon; return <button key={item.id} type="button" className={activeView === item.id ? "active" : ""} onClick={() => setActiveView(item.id)} aria-current={activeView === item.id ? "page" : undefined}><Icon size={18} /><span>{item.label}</span>{item.id === "security" && stats.warnings > 0 && <em>{stats.warnings}</em>}</button>; })}</nav>
       <div className={`daemon-card ${daemon.ready ? "ready" : "offline"}`}><span className="daemon-orb"><RadioTower size={18} /></span><div><strong>{daemon.ready ? "Moteur local prêt" : "Moteur hors ligne"}</strong><small>{daemon.version ? `Transmission ${daemon.version}` : daemon.state}</small></div><i /></div>
     </aside>
 
     <main className="workspace" id="main-content" tabIndex={-1}>
-      <header className="topbar"><div className="mobile-brand"><img src="./slyorus.png" alt="" /><b>Slyorent</b></div><label className="search-box"><Search size={16} /><span className="sr-only">Rechercher</span><input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Rechercher…" /><kbd>Ctrl K</kbd></label><div className="top-status"><span className={daemon.ready ? "connected" : "disconnected"} /><div><b>{daemon.ready ? "Local" : "Hors ligne"}</b><small>{daemon.ready ? "Cloud désactivé" : "Moteur arrêté"}</small></div></div><button className="icon-button" type="button" disabled={loading} onClick={() => void refresh()} aria-label="Actualiser"><RefreshCw className={loading ? "spin" : ""} size={17} /></button></header>
+      <header className="topbar"><div className="mobile-brand"><img src="./slyorus.png" alt="" /><b>Slyorrent</b></div><label className="search-box"><Search size={16} /><span className="sr-only">Rechercher</span><input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Rechercher…" /><kbd>Ctrl K</kbd></label><div className="top-status"><span className={daemon.ready ? "connected" : "disconnected"} /><div><b>{daemon.ready ? "Local" : "Hors ligne"}</b><small>{daemon.ready ? "Cloud désactivé" : "Moteur arrêté"}</small></div></div><button className="icon-button" type="button" disabled={loading} onClick={() => void refresh()} aria-label="Actualiser"><RefreshCw className={loading ? "spin" : ""} size={17} /></button></header>
 
       {!daemon.ready && <section className="offline-banner" role="alert"><ShieldAlert size={22} /><div><strong>Moteur P2P indisponible</strong><p>{daemon.error || "Transferts suspendus."}</p></div><button type="button" onClick={() => void refresh()}>Réessayer</button></section>}
 
@@ -651,7 +677,7 @@ export default function Home() {
         <ViewHeader
           eyebrow="FLUX P2P EN DIRECT"
           title="Carte des pairs"
-          text="Positions GeoIP approximatives et débits du moteur. IP filtrées ; fond de carte intégré."
+          text="Flux réels, trajectoires animées. Carte locale et positions approximatives."
           icon={Globe2}
           action={<div className="header-actions"><button className="secondary-button" type="button" disabled={locating} onClick={() => void requestMapLocation()}>{locating ? <LoaderCircle className="spin" size={15} /> : <MapPin size={15} />} {localNode ? "Relocaliser" : "Me localiser"}</button><button className="secondary-button" type="button" onClick={() => setManualPlacementOpen((current) => !current)}>Placement manuel</button></div>}
         />
@@ -670,7 +696,7 @@ export default function Home() {
 
       {activeView === "audit" && <><ViewHeader eyebrow="JOURNAL LOCAL" title="Traçabilité" text="Événements du processus principal. Secrets filtrés." icon={History} action={<button className="secondary-button" type="button" onClick={() => void loadAudit()}><RefreshCw size={15} /> Actualiser</button>} /><section className="panel audit-panel"><div className="audit-head"><div><h2>{auditEntries.length} événement{auditEntries.length > 1 ? "s" : ""}</h2><span>Plus récents d’abord · limite 250</span></div><span><LockKeyhole size={13} /> local</span></div>{auditEntries.length ? <div className="audit-list">{auditEntries.map((entry, index) => <article key={entry.id ?? entry.seq ?? `${entry.timestamp ?? entry.ts}-${index}`}><span className={`audit-dot ${String(entry.outcome ?? entry.level ?? "").toLowerCase()}`} /><time>{formatAuditTime(entry.timestamp ?? entry.ts)}</time><div><strong>{entry.action || entry.event || "Événement local"}</strong><small>{auditDetail(entry)}</small></div><span className="audit-outcome">{entry.outcome || entry.level || "info"}</span></article>)}</div> : <EmptyState icon={History} title="Journal vide" text="Aucune opération enregistrée." />}</section></>}
 
-      <footer className="app-footer"><span><ShieldCheck size={13} /> Slyorent · protection Slyorus</span><span>Local · sans compte · sans télémétrie distante</span></footer>
+      <footer className="app-footer"><span><ShieldCheck size={13} /> Slyorrent · protection Slyorus</span><span>Local · sans compte · sans télémétrie distante</span></footer>
     </main>
 
     {importOpen && <div className="modal-backdrop">
@@ -678,7 +704,7 @@ export default function Home() {
         <header><div><span className="eyebrow">IMPORT LOCAL</span><h2 id="import-title">Fichier .torrent</h2></div><button className="icon-button" type="button" onClick={closeImport} aria-label="Fermer"><X size={17} /></button></header>
         <div className="dialog-body import-dialog-body">
           <span className="dialog-owl"><img src="./slyorus.png" alt="" /></span>
-          <p>Contrôle local puis ajout en pause.</p>
+          {externalImport ? <p className="external-import-name"><b>{externalImport.name}</b><br />{formatBytes(externalImport.size)} · Ouvert depuis Windows · Ajout en pause</p> : <p>Contrôle local puis ajout en pause.</p>}
           <DestinationControl
             id="import"
             destination={importDestination}

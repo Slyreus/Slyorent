@@ -10,6 +10,7 @@ export type MediaFileInput = {
 
 export type MediaTorrentInput = {
   id: number;
+  hash?: string;
   name: string;
   status?: string;
   percentDone?: number;
@@ -30,6 +31,7 @@ export type ParsedMediaIdentity = {
 
 export type MediaEpisode = ParsedMediaIdentity & {
   key: string;
+  watchKey: string;
   torrentId: number;
   torrentName: string;
   fileIndex: number;
@@ -70,6 +72,8 @@ const AUDIO_EXTENSIONS = new Set(["mp3", "m4a", "aac", "ogg", "oga", "opus", "wa
 const RELEASE_TOKENS = /\b(?:2160p|1080p|720p|576p|480p|uhd|bluray|b[rd]rip|web[ ._-]?dl|webrip|hdtv|remux|hdr10?|dolby[ ._-]?vision|dv|x26[45]|h[ ._-]?26[45]|hevc|av1|aac|ac3|eac3|dts(?:hd)?|atmos|multi|vff|vfq|truefrench|french|english|subfrench|proper|repack|limited)\b/giu;
 
 function displayText(value: string) {
+  const technicalSuffix = /\b(?:2160p|1080p|720p|576p|480p|multi|vff|vfq|vostfr|truefrench|bluray|b[rd]rip|web[ ._-]?dl|webrip|hdtv|remux|x26[45]|h[ ._-]?26[45]|hevc|aac|e?ac3|dts(?:hd)?|truehd)\b/iu.exec(value);
+  if (technicalSuffix) value = value.slice(0, technicalSuffix.index);
   return value
     .replace(/[._]+/g, " ")
     .replace(/[-–—]+/g, " ")
@@ -182,6 +186,7 @@ export function buildMediaLibrary(torrents: readonly MediaTorrentInput[], query 
         return {
           ...parsed,
           key: `${torrent.id}:${file.index}`,
+          watchKey: `${torrent.hash || `local-${torrent.id}`}:${file.index}`,
           torrentId: torrent.id,
           torrentName: torrent.name,
           fileIndex: file.index,
@@ -257,4 +262,18 @@ export function buildMediaLibrary(torrents: readonly MediaTorrentInput[], query 
 
 export function flattenPlayableSeries(group: TorrentMediaGroup, seriesKey: string) {
   return group.series.find((series) => series.key === seriesKey)?.seasons.flatMap((season) => season.episodes).filter((episode) => episode.playable) ?? [];
+}
+
+/** Relier les saisons locales d'une série sans rejouer les copies du même épisode. */
+export function buildPlaybackQueue(episodes: readonly MediaEpisode[], current: MediaEpisode) {
+  const episodic = current.episodeNumber !== null;
+  const candidates = episodes.filter((episode) => episode.playable && episode.kind === current.kind && folded(episode.seriesTitle) === folded(current.seriesTitle)
+    && (episodic ? episode.episodeNumber !== null : episode.torrentId === current.torrentId));
+  const selected = new Map<string, MediaEpisode>();
+  for (const episode of candidates) {
+    const identity = episodic ? `${episode.seasonNumber}:${episode.episodeNumber}` : episode.key;
+    const previous = selected.get(identity);
+    if (!previous || episode.key === current.key || (previous.key !== current.key && previous.torrentId !== current.torrentId && episode.torrentId === current.torrentId)) selected.set(identity, episode);
+  }
+  return [...selected.values()].sort((left, right) => compareNullableNumber(left.seasonNumber, right.seasonNumber) || compareNullableNumber(left.episodeNumber, right.episodeNumber) || left.fileName.localeCompare(right.fileName, "fr", { numeric: true }));
 }

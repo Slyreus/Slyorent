@@ -75,3 +75,46 @@ test("le coffre révoque un jeton lorsque le fichier a changé après l'analyse"
   assert.equal((await vault.handle(ownedRequest(issued.url, 9))).status, 409);
   assert.equal((await vault.handle(ownedRequest(issued.url, 9))).status, 404);
 });
+
+test("maintenir une pause de plusieurs heures sans allonger un jeton abandonné", async (t) => {
+  const { filePath } = await temporaryMedia(t);
+  const file = await stat(filePath);
+  let now = Date.now();
+  const vault = new MediaVault({ now: () => now });
+  const issue = () => vault.issue({ filePath, torrentKey: "test", ownerWebContentsId: 42, mimeType: "video/mp4", name: "media.mp4", expectedSize: file.size, expectedMtimeMs: file.mtimeMs });
+  const active = issue();
+  const abandoned = issue();
+  for (let minute = 0; minute < 180; minute++) {
+    now += 60_000;
+    await vault.renew(active.url, 42);
+  }
+  const resumed = await vault.handle(ownedRequest(active.url, 42, { headers: { Range: "bytes=4-7" } }));
+  assert.equal(resumed.status, 206);
+  await resumed.arrayBuffer();
+  assert.equal((await vault.handle(ownedRequest(abandoned.url, 42))).status, 404);
+  assert.equal(vault.isFileInUse(filePath), true);
+  vault.release(active.url, 42);
+  assert.equal(vault.isFileInUse(filePath), false);
+});
+
+test("refuser le renouvellement par une autre fenêtre ou après modification", async (t) => {
+  const { filePath } = await temporaryMedia(t);
+  const file = await stat(filePath);
+  const vault = new MediaVault();
+  const issued = vault.issue({ filePath, torrentKey: "test", ownerWebContentsId: 42, mimeType: "video/mp4", name: "media.mp4", expectedSize: file.size, expectedMtimeMs: file.mtimeMs });
+  await assert.rejects(vault.renew(issued.url, 43), /refusé/);
+  vault.release(issued.url, 43);
+  await vault.renew(issued.url, 42);
+  await appendFile(filePath, "changed");
+  await assert.rejects(vault.renew(issued.url, 42), /changé/);
+  assert.equal((await vault.handle(ownedRequest(issued.url, 42))).status, 404);
+});
+
+test("ne pas ressusciter un accès révoqué lors d'un contrôle de sécurité", async (t) => {
+  const { filePath } = await temporaryMedia(t);
+  const file = await stat(filePath);
+  const vault = new MediaVault();
+  const issued = vault.issue({ filePath, torrentKey: "test", ownerWebContentsId: 42, mimeType: "video/mp4", name: "media.mp4", expectedSize: file.size, expectedMtimeMs: file.mtimeMs });
+  vault.revokeTorrent("test");
+  await assert.rejects(vault.renew(issued.url, 42), /refusé/);
+});

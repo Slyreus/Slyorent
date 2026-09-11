@@ -4,6 +4,7 @@ import path from "node:path";
 import { extractFile, listPackage } from "@electron/asar";
 
 const root = path.resolve(process.argv[2] || ".");
+const expectedPackage = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
 const resources = path.join(root, "release", "win-unpacked", "resources");
 const asarPath = path.join(resources, "app.asar");
 const engineSource = path.join(root, ".runtime", "engine", "transmission-4.1.3", "PFiles", "Transmission");
@@ -49,7 +50,7 @@ if (await regularFile(asarPath, "app.asar")) {
     if (!entries.includes(required)) errors.push(`entrée requise absente de app.asar : ${required}`);
   }
   const packageDocument = JSON.parse(extractFile(asarPath, "package.json").toString("utf8"));
-  if (packageDocument.version !== "1.0.0" || packageDocument.productName !== "Slyorent") errors.push("métadonnées de version invalides dans app.asar");
+  if (packageDocument.version !== expectedPackage.version || packageDocument.productName !== "Slyorrent") errors.push("métadonnées de version invalides dans app.asar");
 
   const currentUsername = String(process.env.USERNAME || "").trim().toLowerCase();
   const textEntries = entries.filter((entry) => /\.(?:cjs|css|html|js|json|md|mjs|txt|yml)$/iu.test(entry) && !entry.endsWith("package-lock.json"));
@@ -85,7 +86,7 @@ for (const [source, packaged, expected, label] of binaryChecks) {
 }
 
 for (const license of [
-  "Slyorent-LICENSE.txt", "THIRD_PARTY_NOTICES.md", "Transmission-COPYING.txt", "FFmpeg-GPL-3.0.txt",
+  "Slyorrent-LICENSE.txt", "THIRD_PARTY_NOTICES.md", "Transmission-COPYING.txt", "FFmpeg-GPL-3.0.txt",
   "FFmpeg-BUILD.txt", "geoip-lite-and-GeoLite2-LICENSE.txt", "WORLD_GEOMETRY_LICENSE.md",
 ]) await regularFile(path.join(resources, "licenses", license), `licence ${license}`);
 

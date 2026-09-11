@@ -1,6 +1,6 @@
 # Moteur média local
 
-Slyorent utilise uniquement en local les paquets `ffmpeg-static@5.3.0` et
+Slyorrent utilise uniquement en local les paquets `ffmpeg-static@5.3.0` et
 `@derhuerst/ffprobe-static@5.3.0`, distribués sous licence GPL-3.0-or-later.
 
 - Projet et code source : https://github.com/eugeneware/ffmpeg-static

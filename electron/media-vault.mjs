@@ -78,11 +78,14 @@ export async function validateMediaSignature(filePath) {
 
 export class MediaVault {
   #tokens = new Map();
+  #now;
+
+  constructor({ now = Date.now } = {}) { this.#now = now; }
 
   issue({ filePath, torrentKey, ownerWebContentsId, mimeType, name, expectedSize, expectedMtimeMs }) {
     this.prune();
     const token = randomBytes(32).toString("base64url");
-    const expiresAt = Date.now() + TOKEN_TTL_MS;
+    const expiresAt = this.#now() + TOKEN_TTL_MS;
     this.#tokens.set(token, { filePath, torrentKey, ownerWebContentsId, mimeType, name, expectedSize, expectedMtimeMs, expiresAt });
     return { url: `secutorrent-media://stream/${token}`, expiresAt: new Date(expiresAt).toISOString(), mimeType, name };
   }
@@ -95,8 +98,43 @@ export class MediaVault {
     for (const [token, entry] of this.#tokens) if (entry.ownerWebContentsId === ownerWebContentsId) this.#tokens.delete(token);
   }
 
+  isFileInUse(filePath) {
+    this.prune();
+    return [...this.#tokens.values()].some((entry) => entry.filePath === filePath);
+  }
+
+  #ownedEntry(url, ownerWebContentsId) {
+    this.prune();
+    let parsed;
+    try { parsed = new URL(url); } catch { throw new Error("Accès média invalide."); }
+    const token = parsed.pathname.slice(1);
+    const entry = this.#tokens.get(token);
+    if (parsed.protocol !== "secutorrent-media:" || parsed.hostname !== "stream" || parsed.port || parsed.search || parsed.hash || parsed.username || parsed.password
+      || !entry || entry.ownerWebContentsId !== ownerWebContentsId) throw new Error("Accès média expiré ou refusé.");
+    return { token, entry };
+  }
+
+  async renew(url, ownerWebContentsId) {
+    const { token, entry } = this.#ownedEntry(url, ownerWebContentsId);
+    const handle = await open(entry.filePath, "r");
+    try {
+      const info = await handle.stat();
+      if (!info.isFile() || info.size !== entry.expectedSize || info.mtimeMs !== entry.expectedMtimeMs) {
+        this.#tokens.delete(token);
+        throw new Error("Le média a changé depuis sa validation.");
+      }
+      entry.expiresAt = this.#now() + TOKEN_TTL_MS;
+      return { expiresAt: new Date(entry.expiresAt).toISOString() };
+    } finally { await handle.close(); }
+  }
+
+  release(url, ownerWebContentsId) {
+    try { this.#tokens.delete(this.#ownedEntry(url, ownerWebContentsId).token); } catch { /* Un accès expiré est déjà révoqué. */ }
+    return { ok: true };
+  }
+
   prune() {
-    const now = Date.now();
+    const now = this.#now();
     for (const [token, entry] of this.#tokens) if (entry.expiresAt <= now) this.#tokens.delete(token);
   }
 
@@ -140,6 +178,10 @@ export class MediaVault {
         return new Response(null, { status: 405, headers: { Allow: "GET, HEAD" } });
       }
       const stream = fileHandle.createReadStream({ start: range.start, end: range.end, autoClose: true });
+      entry.expiresAt = this.#now() + TOKEN_TTL_MS;
+      const abort = () => stream.destroy();
+      request.signal?.addEventListener("abort", abort, { once: true });
+      stream.once("close", () => request.signal?.removeEventListener("abort", abort));
       return new Response(Readable.toWeb(stream), { status: range.partial ? 206 : 200, headers });
     } catch {
       return new Response(null, { status: 404 });

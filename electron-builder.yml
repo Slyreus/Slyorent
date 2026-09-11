@@ -1,5 +1,5 @@
 appId: com.slyreus.slyorent
-productName: Slyorent
+productName: Slyorrent
 copyright: Copyright © 2026 Slyreus
 
 directories:
@@ -42,7 +42,7 @@ extraResources:
       - styles/*.dll
       - tls/*.dll
   - from: LICENSE
-    to: licenses/Slyorent-LICENSE.txt
+    to: licenses/Slyorrent-LICENSE.txt
   - from: THIRD_PARTY_NOTICES.md
     to: licenses/THIRD_PARTY_NOTICES.md
   - from: third_party/transmission-COPYING.txt
@@ -63,16 +63,17 @@ win:
         - x64
   icon: public/slyorus.png
   requestedExecutionLevel: asInvoker
-  artifactName: Slyorent-Setup-${version}.${ext}
+  artifactName: Slyorrent-Setup-${version}.${ext}
 
 nsis:
+  include: build/file-associations.nsh
   oneClick: true
   perMachine: false
   allowElevation: false
   createDesktopShortcut: always
   createStartMenuShortcut: true
-  shortcutName: Slyorent
-  uninstallDisplayName: Slyorent
+  shortcutName: Slyorrent
+  uninstallDisplayName: Slyorrent
   runAfterFinish: true
   deleteAppDataOnUninstall: false
 

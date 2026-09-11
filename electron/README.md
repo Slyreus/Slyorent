@@ -1,4 +1,4 @@
-# Backend local de Slyorent
+# Backend local de Slyorrent
 
 Ce dossier contient le processus principal Electron, son preload minimal et le moteur P2P local. Le renderer n'obtient jamais Node.js ni les identifiants Transmission.
 
@@ -7,7 +7,7 @@ Ce dossier contient le processus principal Electron, son preload minimal et le m
 - `BrowserWindow`: `sandbox`, `contextIsolation`, `webSecurity`, aucun `nodeIntegration`, aucune navigation ou fenêtre externe.
 - JSON-RPC 2.0 local sur IPC avec liste blanche de méthodes et contrôle strict du `webContents` principal.
 - Transmission 4.1.3, ses 18 DLL/plugins et son `qt.conf` sont vérifiés par une liste fermée d'empreintes SHA-256 avant exécution; toute DLL ajoutée bloque le démarrage. Son JSON-RPC 2.0 HTTP est lié à `127.0.0.1`, protégé par Basic Auth aléatoire et gère le défi HTTP 409 `X-Transmission-Session-Id`.
-- Le profil, les données temporaires et l'audit restent confinés dans `app.getPath("userData")`. Transmission télécharge toujours dans la quarantaine interne. La destination finale vient du sélecteur natif Windows, est canonisée et enregistrée dans une politique bornée ; le renderer ne reçoit qu'un jeton éphémère lié à sa fenêtre. La bibliothèque par défaut est `Documents/Slyorent`.
+- Le profil, les données temporaires et l'audit restent confinés dans `app.getPath("userData")`. Transmission télécharge toujours dans la quarantaine interne. La destination finale vient du sélecteur natif Windows, est canonisée et enregistrée dans une politique bornée ; le renderer ne reçoit qu'un jeton éphémère lié à sa fenêtre. La bibliothèque par défaut est `Documents/Slyorrent`.
 - Les trackers littéraux ou résolus vers une adresse locale/réservée sont refusés avant démarrage.
 - Le journal `audit.jsonl` est écrit en ajout par l'application, chaîné par HMAC-SHA-256 et synchronisé sur disque. Il détecte les altérations, mais n'est pas immuable face à un attaquant contrôlant complètement le même compte Windows puisque sa clé locale est stockée à côté. Secrets, magnets et trackers n'y sont jamais écrits.
 - Une URL interne `secutorrent-media://` opaque et temporaire n'est émise qu'après arrêt du torrent, contrôle de chemin, analyse Defender propre et vérification de la signature du média. Si Defender détecte une menace, sa politique de remédiation Windows reste active et le fichier peut être mis en quarantaine système.

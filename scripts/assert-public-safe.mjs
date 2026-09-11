@@ -8,7 +8,7 @@ const ignoredDirectories = new Set([
 ]);
 const textExtensions = new Set([
   ".cjs", ".css", ".html", ".js", ".json", ".jsonc", ".jsx", ".md",
-  ".mjs", ".ps1", ".toml", ".ts", ".tsx", ".txt", ".xml", ".yaml", ".yml",
+  ".mjs", ".nsh", ".ps1", ".toml", ".ts", ".tsx", ".txt", ".xml", ".yaml", ".yml",
 ]);
 const forbiddenFileExtensions = new Set([
   ".7z", ".dll", ".dmp", ".env", ".exe", ".key", ".mmdb", ".msi",

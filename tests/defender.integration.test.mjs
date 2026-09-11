@@ -32,7 +32,7 @@ test("Microsoft Defender actif certifie un fichier local inoffensif", {
   assert.ok(Number.isFinite(result.mtimeMs));
 });
 
-test("Slyorent refuse de certifier un fichier lorsque Defender est indisponible", {
+test("Slyorrent refuse de certifier un fichier lorsque Defender est indisponible", {
   skip: process.platform !== "win32" || !defenderUnavailableExpected,
   timeout: 30_000,
 }, async () => {
