@@ -4,6 +4,9 @@ import { fileURLToPath } from "node:url";
 
 const directory = path.resolve(process.argv[2]);
 const preview = process.argv.includes("--preview");
+// Un test de pixels doit continuer quand une autre fenêtre le recouvre.
+// La limitation en arrière-plan de l'application reste inchangée.
+if (!preview) app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
 app.setPath("userData", path.join(directory, "profile"));
 async function run() {
   await app.whenReady();

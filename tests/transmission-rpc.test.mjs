@@ -15,6 +15,7 @@ async function listenOnLoopback(handler) {
 }
 
 async function closeServer(server) {
+  server.closeAllConnections();
   await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
 }
 
@@ -91,4 +92,35 @@ test("Transmission RPC refuse une réponse dont l'identifiant ne correspond pas"
     client.call("torrent_get"),
     (error) => error instanceof TransmissionRpcError && error.code === "INVALID_RESPONSE",
   );
+});
+
+test("borner la réponse RPC avant de charger un corps annoncé trop volumineux", async (t) => {
+  const { server, port } = await listenOnLoopback((_request, response) => {
+    response.writeHead(200, { "Content-Length": String(17 * 1024 * 1024) });
+    response.flushHeaders();
+  });
+  t.after(() => closeServer(server));
+  const client = new TransmissionRpcClient({ port, username: "u", password: "p" });
+  await assert.rejects(client.call("session_get", {}, 2_000), { code: "RESPONSE_TOO_LARGE" });
+});
+
+test("interrompre une réponse RPC en morceaux au-delà de la limite", async (t) => {
+  const { server, port } = await listenOnLoopback((_request, response) => {
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.write(Buffer.alloc(17 * 1024 * 1024, 32));
+    response.end();
+  });
+  t.after(() => closeServer(server));
+  const client = new TransmissionRpcClient({ port, username: "u", password: "p" });
+  await assert.rejects(client.call("session_get"), { code: "RESPONSE_TOO_LARGE" });
+});
+
+test("appliquer le délai RPC aussi à un corps qui ne termine pas", async (t) => {
+  const { server, port } = await listenOnLoopback((_request, response) => {
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.write('{"jsonrpc":"2.0",');
+  });
+  t.after(() => closeServer(server));
+  const client = new TransmissionRpcClient({ port, username: "u", password: "p" });
+  await assert.rejects(client.call("session_get", {}, 150), { code: "UNAVAILABLE" });
 });

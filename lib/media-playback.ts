@@ -1,12 +1,13 @@
 import type { MediaEpisode } from "./media-library";
 
 export type WatchRecord = { position: number; duration: number; completed: boolean; updatedAt: number };
-export type MediaAccess = { url: string; mimeType: string; expiresAt: string; audioAdapted?: boolean; audioCodec?: string | null; audioLanguage?: string | null };
+export type MediaAccess = { url: string; mimeType: string; expiresAt: string; audioAdapted?: boolean; audioCodec?: string | null; audioLanguage?: string | null; videoAdapted?: boolean; videoCodec?: string | null };
 type PlaybackBridge = {
   openMedia: (options: { id: number; fileIndex: number; purpose: "playback"; requestId: string }) => Promise<MediaAccess>;
   renewMedia: (url: string) => Promise<{ expiresAt: string }>;
   releaseMedia: (url: string) => Promise<{ ok: true }>;
   cancelMediaPreparation: (requestId: string) => Promise<{ ok: true }>;
+  mediaPreparation?: (requestId: string) => Promise<SecuTorrentMediaPreparation | null>;
 };
 
 export function formatMediaTime(value: number) {
@@ -91,6 +92,12 @@ export class MediaPlaybackSession {
   }
 
   reopen(episode: MediaEpisode) { return this.prepare(episode); }
+
+  async progress(episodeKey: string) {
+    if (!this.bridge.mediaPreparation || this.closed) return null;
+    const request = [...this.pending].find(([, pending]) => pending.key === episodeKey && !pending.cancelled);
+    return request ? this.bridge.mediaPreparation(request[0]) : null;
+  }
 
   async prewarm(episode: MediaEpisode) {
     if (this.closed || !episode.playable) return false;

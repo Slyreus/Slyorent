@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
 import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
+import { promisify } from "node:util";
 import { extractFile, listPackage } from "@electron/asar";
+import { NtExecutable, NtExecutableResource, Resource } from "resedit";
+import { inspectWindowsIco } from "./icon-resources.mjs";
 
 const root = path.resolve(process.argv[2] || ".");
 const expectedPackage = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
@@ -46,8 +50,11 @@ if (await regularFile(asarPath, "app.asar")) {
     if (forbiddenRoots.some((prefix) => entry === prefix.slice(0, -1) || entry.startsWith(prefix))) errors.push(`entrée interdite dans app.asar : ${entry}`);
     if (/\.(?:env|key|log|mmdb|msi|part|pem|pfx|resume|torrent)$/iu.test(entry)) errors.push(`fichier sensible dans app.asar : ${entry}`);
   }
-  for (const required of ["dist/index.html", "electron/main.mjs", "electron/preload.cjs", "public/slyorus.png"]) {
+  for (const required of ["dist/index.html", "electron/main.mjs", "electron/preload.cjs", "electron/library-preferences.mjs", "electron/library-preferences-schema.mjs", "public/slyorus.png", "public/slyorrent-logo.png"]) {
     if (!entries.includes(required)) errors.push(`entrée requise absente de app.asar : ${required}`);
+  }
+  for (const module of ["electron/library-preferences.mjs", "electron/library-preferences-schema.mjs"]) {
+    if (entries.includes(module) && !extractFile(asarPath, module).equals(await readFile(path.join(root, module)))) errors.push(`module de médiathèque périmé : ${module}`);
   }
   const packageDocument = JSON.parse(extractFile(asarPath, "package.json").toString("utf8"));
   if (packageDocument.version !== expectedPackage.version || packageDocument.productName !== "Slyorrent") errors.push("métadonnées de version invalides dans app.asar");
@@ -56,7 +63,7 @@ if (await regularFile(asarPath, "app.asar")) {
   const textEntries = entries.filter((entry) => /\.(?:cjs|css|html|js|json|md|mjs|txt|yml)$/iu.test(entry) && !entry.endsWith("package-lock.json"));
   for (const entry of textEntries) {
     let content;
-    try { content = extractFile(asarPath, entry).toString("utf8"); }
+    try { content = extractFile(asarPath, path.join(...entry.split("/"))).toString("utf8"); }
     catch { continue; }
     if (content.length > 3_000_000) continue;
     if (currentUsername.length >= 3 && content.toLowerCase().includes(currentUsername)) errors.push(`nom du profil Windows dans app.asar : ${entry}`);
@@ -64,6 +71,27 @@ if (await regularFile(asarPath, "app.asar")) {
     if (/[A-Za-z]:[\\/]Users[\\/](?!Public[\\/]|Default[\\/])/iu.test(content)) errors.push(`chemin Windows personnel dans app.asar : ${entry}`);
   }
 }
+
+try {
+  const iconPath = path.join(root, "public", "slyorrent.ico");
+  const expectedIcons = inspectWindowsIco(await readFile(iconPath));
+  const executablePath = path.join(root, "release", "win-unpacked", "Slyorrent.exe");
+  const executable = NtExecutable.from(await readFile(executablePath), { ignoreCert: true });
+  const nativeResources = NtExecutableResource.from(executable);
+  const groups = Resource.IconGroupEntry.fromEntries(nativeResources.entries);
+  if (!groups.length) throw new Error("aucune icône dans l'exécutable");
+  for (const group of groups) {
+    if (group.icons.length !== expectedIcons.length) throw new Error("résolutions manquantes dans l'exécutable");
+    for (let index = 0; index < expectedIcons.length; index += 1) {
+      const actual = nativeResources.entries.find((entry) => entry.type === 3 && entry.id === group.icons[index].iconID && entry.lang === group.lang);
+      if (!actual || !Buffer.from(actual.bin).equals(expectedIcons[index].png)) throw new Error("logo de l'exécutable différent du logo validé");
+    }
+  }
+  if (await sha256(iconPath) !== await sha256(path.join(resources, "slyorrent.ico"))) throw new Error("icône des associations absente ou différente");
+  if (process.platform === "win32") {
+    await promisify(execFile)("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path.join(root, "scripts", "check-windows-icon.ps1"), "-FilePath", executablePath], { windowsHide: true, timeout: 30_000 });
+  }
+} catch (error) { errors.push(`icônes Windows : ${error.message}`); }
 
 const packagedEngineFiles = (await relativeFiles(enginePackaged).catch(() => [])).map((file) => file.toLowerCase()).sort();
 if (JSON.stringify(packagedEngineFiles) !== JSON.stringify(engineFiles)) errors.push("la liste du moteur Transmission embarqué ne correspond pas à l’allowlist");

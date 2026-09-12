@@ -126,6 +126,10 @@
 .sly-media-source-meta { display: flex; align-items: center; gap: 6px; color: #88a4b7; font-size: 10px; }
 .sly-media-player-error { padding: 10px 16px; border-top: 1px solid #ff637038; background: #821c2933; color: #ffabb3; font-size: 11px; }
 .sly-media-spin { animation: sly-media-spin .9s linear infinite; }
+.sly-media-conversion-progress { width: min(320px, 80%); display: flex; align-items: center; gap: 12px; color: #bdeaff; font-size: 13px; font-variant-numeric: tabular-nums; }
+.sly-media-conversion-progress progress { flex: 1; min-width: 0; height: 7px; appearance: none; border: 0; border-radius: 8px; overflow: hidden; background: #163447; }
+.sly-media-conversion-progress progress::-webkit-progress-bar { background: #163447; border-radius: 8px; }
+.sly-media-conversion-progress progress::-webkit-progress-value { background: #36c9f5; border-radius: 8px; }
 @keyframes sly-media-spin { to { transform: rotate(360deg); } }
 @media (max-width: 850px) {
   .sly-media-row-main { grid-template-columns: 90px minmax(0, 1fr) 98px 28px; gap: 10px; }

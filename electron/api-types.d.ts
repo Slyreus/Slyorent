@@ -1,6 +1,11 @@
 export {};
 
 declare global {
+  interface SecuTorrentMediaPreparation {
+    stage: "probe" | "queued" | "video" | "audio" | "finalizing" | "scan" | "ready";
+    percent: number | null;
+    hardware?: boolean;
+  }
   interface SecuTorrentWatchRecord {
     position: number;
     duration: number;
@@ -80,6 +85,7 @@ declare global {
     persisted: false;
   };
   interface SecuTorrentTorrent {
+    addedAt?: number;
     id: number;
     hash: string;
     name: string;
@@ -267,11 +273,14 @@ declare global {
       verifyAndScan(id: number): Promise<{ ok: true; clean: true; resumed: boolean; filesScanned: number; signatureUpdatedAt: string; torrent: SecuTorrentTorrent }>;
       remove(options: { id: number; deleteData: boolean }): Promise<{ ok: true }>;
       setSeedPolicy(options: { id: number; ratioLimit: number | null; idleMinutes: number | null; uploadLimitKbps: number | null }): Promise<{ ok: true; torrent: SecuTorrentTorrent }>;
-      openMedia(options: { id: number; fileIndex: number; purpose?: "playback" | "thumbnail"; requestId?: string }): Promise<{ url: string; expiresAt: string; mimeType: string; name: string; audioAdapted: boolean; audioCodec: string | null; audioLanguage: string | null }>;
+      openMedia(options: { id: number; fileIndex: number; purpose?: "playback" | "thumbnail"; requestId?: string }): Promise<{ url: string; expiresAt: string; mimeType: string; name: string; audioAdapted: boolean; audioCodec: string | null; audioLanguage: string | null; videoAdapted?: boolean; videoCodec?: string | null }>;
       renewMedia(url: string): Promise<{ expiresAt: string }>;
       releaseMedia(url: string): Promise<{ ok: true }>;
       cancelMediaPreparation(requestId: string): Promise<{ ok: true }>;
+      mediaPreparation(requestId: string): Promise<SecuTorrentMediaPreparation | null>;
       watchHistory(): Promise<SecuTorrentWatchHistory>;
+      libraryPreferences(): Promise<import("./library-preferences-schema.mjs").LibraryPreferences>;
+      saveLibraryPreferences(options: import("./library-preferences-schema.mjs").LibraryPreferencePatch): Promise<import("./library-preferences-schema.mjs").LibraryPreferences>;
       savePlayback(options: { id: number; fileIndex: number; position: number; duration: number; completed: boolean }): Promise<SecuTorrentWatchRecord & { key: string }>;
       setMediaWatched(options: { id: number; fileIndex: number; watched: boolean }): Promise<SecuTorrentWatchRecord & { key: string }>;
       audit(limit?: number): Promise<SecuTorrentAuditEntry[]>;

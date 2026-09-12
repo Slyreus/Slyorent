@@ -13,7 +13,7 @@ const execute = promisify(execFile);
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const temporary = await mkdtemp(path.join(os.tmpdir(), "slyorent-media-ui-"));
 try {
-  await build({ configFile: false, root: path.join(repository, "tests", "ui"), base: "./", publicDir: path.join(repository, "public"), plugins: [react()], logLevel: "warn", build: { outDir: path.join(temporary, "dist"), emptyOutDir: false } });
+  await build({ configFile: false, root: path.join(repository, "tests", process.argv.includes("--catalog") ? "catalog-ui" : "ui"), base: "./", publicDir: path.join(repository, "public"), plugins: [react()], logLevel: "warn", build: { outDir: path.join(temporary, "dist"), emptyOutDir: false } });
   await execute(ffmpeg, ["-nostdin", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=s=320x180:r=24:d=60", "-f", "lavfi", "-i", "sine=frequency=440:duration=60", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-movflags", "+faststart", "-shortest", path.join(temporary, "sample.mp4")], { windowsHide: true, timeout: 30_000 });
   const environment = { ...process.env };
   delete environment.ELECTRON_RUN_AS_NODE;

@@ -2,6 +2,18 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { SharedPreparations } from "../electron/shared-preparation.mjs";
 
+test("diffuser la progression à chaque lecteur et arrêter les notifications après annulation", async () => {
+  const jobs = new SharedPreparations(); const controller = new AbortController();
+  const first = [], second = []; let report, done;
+  const prepare = (_signal, notify) => { report = notify; return new Promise((resolve) => { done = resolve; }); };
+  const left = jobs.run("film", controller.signal, prepare, (value) => first.push(value));
+  await Promise.resolve(); report(20);
+  const right = jobs.run("film", undefined, prepare, (value) => second.push(value));
+  const cancelled = assert.rejects(left, { name: "AbortError" }); controller.abort(); await cancelled;
+  report(80); done("ok"); await right;
+  assert.deepEqual(first, [20]); assert.deepEqual(second, [20, 80]);
+});
+
 test("conserver la conversion tant qu'un lecteur l'attend", async () => {
   const jobs = new SharedPreparations();
   const first = new AbortController();

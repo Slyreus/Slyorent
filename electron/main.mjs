@@ -7,6 +7,7 @@ import { AuditLog } from "./audit-log.mjs";
 import { ContentRegistry } from "./content-registry.mjs";
 import { MediaAdapter } from "./media-adapter.mjs";
 import { MediaVault } from "./media-vault.mjs";
+import { LibraryPreferences } from "./library-preferences.mjs";
 import { createDefaultPeerTelemetry } from "./peer-telemetry.mjs";
 import { SharingHistory } from "./sharing-history.mjs";
 import { TorrentService } from "./torrent-service.mjs";
@@ -92,7 +93,7 @@ function errorEnvelope(id, error) {
   return { jsonrpc: "2.0", id, error: { code: safeCode, message: safeMessage } };
 }
 
-function registerIpc({ mainWindow, renderer, service, manager, audit, sharingHistory, watchHistory, mediaVault, openQueue }) {
+function registerIpc({ mainWindow, renderer, service, manager, audit, sharingHistory, watchHistory, libraryPreferences, mediaVault, openQueue }) {
   const allowRequest = createRateLimiter();
   const destinationCapabilities = new Map();
   const pruneDestinationCapabilities = () => {
@@ -203,7 +204,10 @@ function registerIpc({ mainWindow, renderer, service, manager, audit, sharingHis
     ["renewMedia", async ({ url }, event) => mediaVault.renew(url, event.sender.id)],
     ["releaseMedia", async ({ url }, event) => mediaVault.release(url, event.sender.id)],
     ["cancelMediaPreparation", async ({ requestId }, event) => service.cancelMediaPreparation(requestId, event.sender.id)],
+    ["mediaPreparation", async ({ requestId }, event) => service.mediaPreparation(requestId, event.sender.id)],
     ["watchHistory", async () => watchHistory.snapshot()],
+    ["libraryPreferences", async () => libraryPreferences.snapshot()],
+    ["saveLibraryPreferences", async (params) => libraryPreferences.update(params)],
     ["savePlayback", async (params) => {
       const reference = await service.mediaReference(params);
       return watchHistory.update(reference.hash, reference.fileIndex, params);
@@ -297,6 +301,7 @@ async function bootstrap() {
   }).initialize();
   const mediaVault = new MediaVault();
   const watchHistory = await new WatchHistory(path.join(app.getPath("userData"), "watch-history.json")).initialize();
+  const libraryPreferences = await new LibraryPreferences(path.join(app.getPath("userData"), "library-preferences.json")).initialize();
   const mediaAdapter = await new MediaAdapter({ cacheDirectory: path.join(app.getPath("userData"), "media-cache"), isFileInUse: (filePath) => mediaVault.isFileInUse(filePath) }).initialize();
   const peerTelemetry = await createDefaultPeerTelemetry({ databasePath: path.join(app.getAppPath(), ".runtime", "geoip", "GeoLite2-City.mmdb") });
   const contentRegistry = new ContentRegistry(path.join(app.getPath("userData"), "content-security"));
@@ -308,6 +313,7 @@ async function bootstrap() {
 
   const stopSharingMaintenance = async () => {
     await watchHistory.flush();
+    await libraryPreferences.flush();
     if (sharingMaintenanceTimer !== null) {
       clearInterval(sharingMaintenanceTimer);
       sharingMaintenanceTimer = null;
@@ -375,7 +381,7 @@ async function bootstrap() {
     backgroundColor: "#050b18",
     autoHideMenuBar: true,
     title: PRODUCT_NAME,
-    icon: path.join(app.getAppPath(), "public", "slyorus.png"),
+    icon: path.join(app.getAppPath(), "public", "slyorrent-logo.png"),
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       sandbox: true,
@@ -392,7 +398,7 @@ async function bootstrap() {
   });
   mainWindow.webContents.session.protocol.handle("secutorrent-media", (request) => mediaVault.handle(request));
   lockRendererSession(mainWindow, renderer, mediaVault);
-  registerIpc({ mainWindow, renderer, service, manager, audit, sharingHistory, watchHistory, mediaVault, openQueue });
+  registerIpc({ mainWindow, renderer, service, manager, audit, sharingHistory, watchHistory, libraryPreferences, mediaVault, openQueue });
   const mediaOwnerId = mainWindow.webContents.id;
   mainWindow.on("closed", () => service.cancelMediaOwner(mediaOwnerId));
 

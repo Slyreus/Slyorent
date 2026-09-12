@@ -2,20 +2,23 @@ import ffmpegPackagePath from "ffmpeg-static";
 import ffprobePackagePath from "@derhuerst/ffprobe-static";
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { lstat, mkdir, readdir, realpath, rename, stat, statfs, unlink } from "node:fs/promises";
+import { lstat, mkdir, readdir, rename, stat, statfs, unlink } from "node:fs/promises";
+import { availableParallelism } from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { canonicalPathWithoutLinks, UnsafePathError } from "./safe-path.mjs";
+import { resolveMediaBinaryPath } from "./media-binary-path.mjs";
 import { SharedPreparations } from "./shared-preparation.mjs";
+import { adaptationBudget, analyzeProbe, audioLanguage, conversionVideoArgs, localMediaInputArgs, MEDIA_CACHE_PROFILE, mediaProgressParser } from "./media-profile.mjs";
+export { analyzeProbe } from "./media-profile.mjs";
 
 const FFMPEG_SHA256 = "04e1307997530f9cf2fe35cba2ca7e8875ca91da02f89d6c7243df819c94ad00";
 const FFPROBE_SHA256 = "3a7e2dc003dc2cd1472827e4c7c4f056ae1ae0ae7c5bbc580c99b49827351ba4";
 const MAX_PROBE_OUTPUT = 512 * 1024;
 const MAX_DIAGNOSTIC_OUTPUT = 64 * 1024;
 const MAX_CACHE_BYTES = 12 * 1024 * 1024 * 1024;
-const AUDIO_REQUIRING_ADAPTATION = new Set(["ac3", "eac3", "dca", "dts", "truehd"]);
-const MP4_COPY_VIDEO_CODECS = new Set(["h264", "av1", "mpeg4"]);
-const FRENCH_LANGUAGE_CODES = new Set(["fr", "fre", "fra", "french"]);
+const DISK_RESERVE_BYTES = 512 * 1024 * 1024;
+const WORKER_THREADS = Math.max(1, Math.min(8, Math.floor(availableParallelism() / 2)));
 
 function containsPath(parent, child) {
   const relative = path.relative(parent, child);
@@ -39,12 +42,12 @@ async function sha256File(filePath) {
 
 async function verifiedBinary(candidate, expectedHash, label) {
   if (process.platform !== "win32" || process.arch !== "x64") throw new Error(`${label} n'est autorisé que sur Windows x64.`);
-  if (typeof candidate !== "string" || !path.isAbsolute(candidate)) throw new Error(`${label} local est introuvable.`);
-  const info = await lstat(candidate);
+  const executable = resolveMediaBinaryPath(candidate);
+  const info = await lstat(executable);
   if (!info.isFile() || info.isSymbolicLink()) throw new Error(`${label} local n'est pas un fichier régulier.`);
   let resolved;
   try {
-    resolved = await canonicalPathWithoutLinks(candidate);
+    resolved = await canonicalPathWithoutLinks(executable);
   } catch (error) {
     if (error instanceof UnsafePathError) throw new Error(`${label} local passe par un lien interdit.`);
     throw error;
@@ -53,7 +56,7 @@ async function verifiedBinary(candidate, expectedHash, label) {
   return resolved;
 }
 
-function runProcess(executable, args, { timeoutMs, maxStdout = 0, maxStderr = MAX_DIAGNOSTIC_OUTPUT, signal } = {}) {
+function runProcess(executable, args, { timeoutMs, maxStdout = 0, maxStderr = MAX_DIAGNOSTIC_OUTPUT, signal, onStdout } = {}) {
   signal?.throwIfAborted();
   return new Promise((resolve, reject) => {
     const child = spawn(executable, args, {
@@ -69,13 +72,18 @@ function runProcess(executable, args, { timeoutMs, maxStdout = 0, maxStderr = MA
       const next = Buffer.concat([current, chunk]);
       if (next.length <= maximum) return next;
       overflow = true;
+      child.kill();
       return next.subarray(Math.max(0, next.length - maximum));
     };
-    child.stdout.on("data", (chunk) => { stdout = append(stdout, chunk, maxStdout); });
+    child.stdout.on("data", (chunk) => {
+      if (!onStdout) stdout = append(stdout, chunk, maxStdout);
+      else try { onStdout(chunk); } catch (error) { stoppedBy = error; child.kill(); }
+    });
     child.stderr.on("data", (chunk) => { stderr = append(stderr, chunk, maxStderr); });
     let stoppedBy = null;
     const abort = () => { stoppedBy = signal.reason; child.kill(); };
     signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
     const timer = setTimeout(() => {
       stoppedBy = Object.assign(new Error("La préparation du média local a dépassé le délai autorisé."), { code: "MEDIA_ADAPT_TIMEOUT" });
       child.kill();
@@ -96,19 +104,6 @@ function runProcess(executable, args, { timeoutMs, maxStdout = 0, maxStderr = MA
   });
 }
 
-function normalizedLanguage(stream) {
-  return String(stream?.tags?.language || "").trim().toLowerCase();
-}
-
-function selectAudioStream(streams) {
-  const audio = streams.filter((stream) => stream?.codec_type === "audio" && Number.isInteger(stream.index));
-  return audio.find((stream) => FRENCH_LANGUAGE_CODES.has(normalizedLanguage(stream))) ?? audio[0] ?? null;
-}
-
-function selectVideoStream(streams) {
-  return streams.find((stream) => stream?.codec_type === "video" && Number.isInteger(stream.index)) ?? null;
-}
-
 function outputCacheKey({ sourcePath, sourceSize, sourceMtimeMs, videoIndex, audioIndex }) {
   return createHash("sha256").update(JSON.stringify({
     sourcePath: path.resolve(sourcePath).toLowerCase(),
@@ -117,20 +112,8 @@ function outputCacheKey({ sourcePath, sourceSize, sourceMtimeMs, videoIndex, aud
     videoIndex,
     audioIndex,
     ffmpeg: FFMPEG_SHA256,
-    profile: "h264-copy-aac-stereo-v1",
+    profile: MEDIA_CACHE_PROFILE,
   })).digest("hex");
-}
-
-export function analyzeProbe(probe) {
-  const streams = Array.isArray(probe?.streams) ? probe.streams : [];
-  const video = selectVideoStream(streams);
-  const audio = selectAudioStream(streams);
-  if (!video || !audio) return { needsAdaptation: false, video, audio };
-  return {
-    needsAdaptation: AUDIO_REQUIRING_ADAPTATION.has(String(audio.codec_name || "").toLowerCase()),
-    video,
-    audio,
-  };
 }
 
 export class MediaAdapter {
@@ -142,10 +125,13 @@ export class MediaAdapter {
   #conversionTail = Promise.resolve();
   #protectedUntil = new Map();
   #isFileInUse;
+  #hardwareAcceleration;
+  #encoder = null;
 
-  constructor({ cacheDirectory, isFileInUse = () => false }) {
+  constructor({ cacheDirectory, isFileInUse = () => false, hardwareAcceleration = true }) {
     this.#cacheDirectory = path.resolve(cacheDirectory);
     this.#isFileInUse = isFileInUse;
+    this.#hardwareAcceleration = hardwareAcceleration;
   }
 
   async initialize() {
@@ -167,7 +153,8 @@ export class MediaAdapter {
     if (!this.#ffprobe) throw new Error("Le moteur média local n'est pas initialisé.");
     const { stdout } = await runProcess(this.#ffprobe, [
       "-v", "error",
-      "-show_entries", "stream=index,codec_name,codec_type,channels,channel_layout:stream_tags=language,title",
+      ...localMediaInputArgs(sourcePath),
+      "-show_entries", "stream=index,codec_name,codec_type,channels,channel_layout,width,height,pix_fmt,color_transfer:stream_tags=language:stream_disposition=default,attached_pic:format=duration",
       "-of", "json",
       "--", sourcePath,
     ], { timeoutMs: 30_000, maxStdout: MAX_PROBE_OUTPUT });
@@ -189,18 +176,19 @@ export class MediaAdapter {
     for (const entry of entries.sort((left, right) => left.mtimeMs - right.mtimeMs)) {
       if (total + reservedBytes <= MAX_CACHE_BYTES) break;
       if (this.#isFileInUse(entry.candidate) || (this.#protectedUntil.get(entry.candidate) || 0) > Date.now()) continue;
-      await unlink(entry.candidate).catch(() => undefined);
-      total -= entry.size;
+      if (await unlink(entry.candidate).then(() => true, () => false)) total -= entry.size;
     }
     for (const [candidate, until] of this.#protectedUntil) if (until <= Date.now()) this.#protectedUntil.delete(candidate);
+    return total;
   }
 
-  async prepare({ sourcePath, sourceSize, sourceMtimeMs, signal }) {
+  async prepare({ sourcePath, sourceSize, sourceMtimeMs, signal, onProgress = () => undefined }) {
     signal?.throwIfAborted();
     if (!this.#ffmpeg || !this.#ffprobe) throw new Error("Le moteur média local n'est pas initialisé.");
-    const resolvedSource = await realpath(sourcePath);
+    const resolvedSource = await canonicalPathWithoutLinks(sourcePath);
     const sourceInfo = await stat(resolvedSource);
-    if (!sourceInfo.isFile() || sourceInfo.size !== sourceSize || sourceInfo.mtimeMs !== sourceMtimeMs) throw new Error("Le média a changé avant sa préparation audio.");
+    if (!sourceInfo.isFile() || sourceInfo.size !== sourceSize || sourceInfo.mtimeMs !== sourceMtimeMs) throw new Error("Le média a changé avant sa préparation.");
+    onProgress({ stage: "probe", percent: null });
     const probeKey = JSON.stringify([resolvedSource, sourceSize, sourceMtimeMs]);
     if (!this.#analyses.has(probeKey)) {
       const probe = this.#probe(resolvedSource).then(analyzeProbe).catch((error) => { this.#analyses.delete(probeKey); throw error; });
@@ -210,97 +198,111 @@ export class MediaAdapter {
     const analysis = await this.#analyses.get(probeKey);
     signal?.throwIfAborted();
     if (!analysis.needsAdaptation) return null;
-    if (!MP4_COPY_VIDEO_CODECS.has(String(analysis.video.codec_name || "").toLowerCase())) {
-      throw Object.assign(new Error(`Le son ${String(analysis.audio.codec_name || "").toUpperCase()} est détecté, mais la vidéo ${String(analysis.video.codec_name || "").toUpperCase()} ne peut pas être adaptée sans réencodage complet.`), { code: "MEDIA_VIDEO_CODEC_UNSUPPORTED" });
-    }
+    adaptationBudget(analysis, sourceSize);
     const key = outputCacheKey({
       sourcePath: resolvedSource,
       sourceSize,
       sourceMtimeMs,
       videoIndex: analysis.video.index,
-      audioIndex: analysis.audio.index,
+      audioIndex: analysis.audio?.index ?? null,
     });
     const outputPath = path.join(this.#cacheDirectory, `${key}.mp4`);
     if (!containsPath(this.#cacheDirectory, outputPath)) throw new Error("Chemin de cache média invalide.");
-    return this.#pending.run(key, signal, (sharedSignal) => this.#prepareOnce({
+    return this.#pending.run(key, signal, (sharedSignal, report) => this.#prepareOnce({
       resolvedSource,
       outputPath,
       sourceSize,
       sourceMtimeMs,
-      video: analysis.video,
-      audio: analysis.audio,
+      analysis,
+      onProgress: report,
       signal: sharedSignal,
     }).then((result) => {
       // Protéger aussi le fichier pendant l'analyse Defender, avant l'émission du jeton.
       this.#protectedUntil.set(result.filePath, Date.now() + 10 * 60_000);
       return result;
-    }));
+    }), onProgress);
   }
 
-  async #prepareOnce({ resolvedSource, outputPath, sourceSize, sourceMtimeMs, video, audio, signal }) {
+  #result(outputPath, info, analysis, cacheHit) {
+    return {
+      filePath: outputPath, size: info.size, mtimeMs: info.mtimeMs, mimeType: "video/mp4",
+      audioAdapted: Boolean(analysis.audio), audioCodec: analysis.audio ? "AAC" : null,
+      audioLanguage: analysis.audio ? audioLanguage(analysis.audio) : null,
+      videoAdapted: analysis.videoAdapted, videoCodec: analysis.videoAdapted ? "H264" : String(analysis.video.codec_name).toUpperCase(), cacheHit,
+    };
+  }
+
+  async #prepareOnce({ resolvedSource, outputPath, sourceSize, sourceMtimeMs, analysis, signal, onProgress }) {
     signal.throwIfAborted();
     const cached = await lstat(outputPath).catch(() => null);
     if (cached) {
-      if (!cached.isFile() || cached.isSymbolicLink() || cached.size <= 0) throw new Error("Le cache audio local est invalide.");
-      return {
-        filePath: outputPath,
-        size: cached.size,
-        mtimeMs: cached.mtimeMs,
-        mimeType: "video/mp4",
-        audioAdapted: true,
-        audioCodec: "AAC",
-        audioLanguage: normalizedLanguage(audio) || "und",
-        cacheHit: true,
-      };
+      if (!cached.isFile() || cached.isSymbolicLink() || cached.size <= 0) throw new Error("Le cache média local est invalide.");
+      return this.#result(outputPath, cached, analysis, true);
     }
 
-    const task = this.#conversionTail.then(() => this.#convert({ resolvedSource, outputPath, sourceSize, sourceMtimeMs, video, audio, signal }));
+    onProgress({ stage: "queued", percent: null });
+    const task = this.#conversionTail.then(() => this.#convert({ resolvedSource, outputPath, sourceSize, sourceMtimeMs, analysis, signal, onProgress }));
     this.#conversionTail = task.catch(() => undefined);
     return task;
   }
 
-  async #convert({ resolvedSource, outputPath, sourceSize, sourceMtimeMs, video, audio, signal }) {
+  async #preferredEncoder() {
+    if (!this.#hardwareAcceleration) return "libx264";
+    if (!this.#encoder) this.#encoder = runProcess(this.#ffmpeg, [
+      "-nostdin", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=s=320x180:d=0.05",
+      "-frames:v", "1", "-c:v", "h264_nvenc", "-pix_fmt", "yuv420p", "-f", "null", "-",
+    ], { timeoutMs: 10_000 }).then(() => "h264_nvenc", () => "libx264");
+    return this.#encoder;
+  }
+
+  async #convert({ resolvedSource, outputPath, sourceSize, sourceMtimeMs, analysis, signal, onProgress }) {
     signal.throwIfAborted();
-    await this.#pruneCache(outputPath, sourceSize);
+    const { reservedBytes } = adaptationBudget(analysis, sourceSize);
+    if (reservedBytes > MAX_CACHE_BYTES) throw Object.assign(new Error("Cette conversion dépasse les 12 Go du cache média."), { code: "MEDIA_ADAPT_CACHE_LIMIT" });
+    const retainedBytes = await this.#pruneCache(outputPath, reservedBytes);
+    if (retainedBytes + reservedBytes > MAX_CACHE_BYTES) throw Object.assign(new Error("Cache média occupé. Fermez les autres lecteurs puis réessayez."), { code: "MEDIA_ADAPT_CACHE_BUSY" });
     const disk = await statfs(this.#cacheDirectory);
     const freeBytes = Number(disk.bavail) * Number(disk.bsize);
-    if (!Number.isFinite(freeBytes) || freeBytes < sourceSize + 512 * 1024 * 1024) {
-      throw Object.assign(new Error("Espace disque insuffisant pour préparer une version locale avec audio compatible."), { code: "MEDIA_ADAPT_NO_SPACE" });
+    if (!Number.isFinite(freeBytes) || freeBytes < reservedBytes + DISK_RESERVE_BYTES) {
+      throw Object.assign(new Error("Espace disque insuffisant pour préparer la lecture locale."), { code: "MEDIA_ADAPT_NO_SPACE" });
     }
+    const outputLimit = Math.floor(Math.min(MAX_CACHE_BYTES - retainedBytes, freeBytes - DISK_RESERVE_BYTES));
     const tempPath = path.join(this.#cacheDirectory, `${randomUUID()}.partial`);
     try {
-      await runProcess(this.#ffmpeg, [
-        "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
-        "-i", resolvedSource,
-        "-map", `0:${video.index}`,
-        "-map", `0:${audio.index}`,
-        "-map_metadata", "-1",
-        "-map_chapters", "-1",
-        "-c:v", "copy",
-        "-c:a", "aac",
-        "-ac", "2",
-        "-b:a", "192k",
-        "-movflags", "+faststart",
-        "-f", "mp4",
-        tempPath,
-      ], { timeoutMs: 60 * 60_000, maxStdout: 0, signal });
+      const convert = async (encoder) => {
+        const stage = analysis.videoAdapted ? "video" : "audio";
+        const hardware = analysis.videoAdapted && encoder === "h264_nvenc";
+        onProgress({ stage, percent: 0, hardware });
+        await runProcess(this.#ffmpeg, [
+          "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-nostats", "-progress", "pipe:1", "-stats_period", "0.5",
+          ...localMediaInputArgs(resolvedSource), "-threads", String(WORKER_THREADS), "-filter_threads", "2", "-i", resolvedSource,
+          "-map", `0:${analysis.video.index}`, ...(analysis.audio ? ["-map", `0:${analysis.audio.index}`] : []),
+          "-map_metadata", "-1", "-map_chapters", "-1", "-sn", "-dn",
+          ...conversionVideoArgs(analysis, encoder, WORKER_THREADS),
+          ...(analysis.audio ? ["-c:a", "aac", "-ac", "2", "-b:a", "192k", "-metadata:s:a:0", `language=${audioLanguage(analysis.audio)}`] : ["-an"]),
+          "-fs", String(outputLimit), "-movflags", "+faststart", "-f", "mp4", tempPath,
+        ], { timeoutMs: 2 * 60 * 60_000, signal, onStdout: mediaProgressParser(analysis.duration, ({ percent, finalizing }) => onProgress({ stage: finalizing ? "finalizing" : stage, percent, hardware })) });
+      };
+      const encoder = analysis.videoAdapted ? await this.#preferredEncoder() : "libx264";
+      try { await convert(encoder); }
+      catch (error) {
+        if (encoder !== "h264_nvenc" || signal.aborted || error.code !== "MEDIA_ADAPT_FAILED") throw error;
+        this.#encoder = Promise.resolve("libx264");
+        await convert("libx264");
+      }
       signal.throwIfAborted();
       const sourceAfter = await stat(resolvedSource);
-      if (sourceAfter.size !== sourceSize || sourceAfter.mtimeMs !== sourceMtimeMs) throw new Error("Le média source a changé pendant sa préparation audio.");
+      if (sourceAfter.size !== sourceSize || sourceAfter.mtimeMs !== sourceMtimeMs) throw new Error("Le média source a changé pendant sa préparation.");
       const tempInfo = await lstat(tempPath);
-      if (!tempInfo.isFile() || tempInfo.isSymbolicLink() || tempInfo.size <= 0) throw new Error("La version audio compatible n'a pas été produite.");
+      if (!tempInfo.isFile() || tempInfo.isSymbolicLink() || tempInfo.size <= 0) throw new Error("La version compatible n'a pas été produite.");
+      if (tempInfo.size >= outputLimit - 1024 * 1024) throw Object.assign(new Error("La conversion a atteint la limite du cache."), { code: "MEDIA_ADAPT_CACHE_LIMIT" });
+      // Refuser une sortie tronquée même si FFmpeg s'est terminé sans erreur.
+      const { stdout } = await runProcess(this.#ffprobe, ["-v", "error", "-protocol_whitelist", "file", "-format_whitelist", "mov", "-show_entries", "format=duration", "-of", "json", "--", tempPath], { timeoutMs: 30_000, maxStdout: MAX_PROBE_OUTPUT, signal });
+      const outputDuration = Number(JSON.parse(stdout.toString("utf8"))?.format?.duration);
+      if (!Number.isFinite(outputDuration) || outputDuration < analysis.duration - 0.5) throw Object.assign(new Error("La conversion vidéo est incomplète."), { code: "MEDIA_ADAPT_INCOMPLETE" });
       await rename(tempPath, outputPath);
       const outputInfo = await stat(outputPath);
-      return {
-        filePath: outputPath,
-        size: outputInfo.size,
-        mtimeMs: outputInfo.mtimeMs,
-        mimeType: "video/mp4",
-        audioAdapted: true,
-        audioCodec: "AAC",
-        audioLanguage: normalizedLanguage(audio) || "und",
-        cacheHit: false,
-      };
+      return this.#result(outputPath, outputInfo, analysis, false);
     } catch (error) {
       await unlink(tempPath).catch(() => undefined);
       throw error;

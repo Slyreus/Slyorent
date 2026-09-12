@@ -8,7 +8,10 @@ const bridge: MediaBridge = {
   renewMedia: (url) => invoke("renewMedia", { url }) as ReturnType<MediaBridge["renewMedia"]>,
   releaseMedia: (url) => invoke("releaseMedia", { url }) as ReturnType<MediaBridge["releaseMedia"]>,
   cancelMediaPreparation: (requestId) => invoke("cancelMediaPreparation", { requestId }) as ReturnType<MediaBridge["cancelMediaPreparation"]>,
+  mediaPreparation: (requestId) => invoke("mediaPreparation", { requestId }) as ReturnType<MediaBridge["mediaPreparation"]>,
   watchHistory: () => invoke("watchHistory") as ReturnType<MediaBridge["watchHistory"]>,
+  libraryPreferences: () => invoke("libraryPreferences") as ReturnType<NonNullable<MediaBridge["libraryPreferences"]>>,
+  saveLibraryPreferences: (options) => invoke("saveLibraryPreferences", options) as ReturnType<NonNullable<MediaBridge["saveLibraryPreferences"]>>,
   savePlayback: (options) => invoke("savePlayback", options) as ReturnType<MediaBridge["savePlayback"]>,
   setMediaWatched: (options) => invoke("setMediaWatched", options) as ReturnType<MediaBridge["setMediaWatched"]>,
   verifyAndScan: async () => { throw new Error("Hors test"); },
@@ -35,6 +38,8 @@ const recordKey = (index: number) => `${"b".repeat(40)}:${index}`;
 
 async function run() {
   render();
+  await until(() => Boolean(document.querySelector("[aria-label='Vue Liste']:not(:disabled)")), "Préférences non chargées");
+  click("[aria-label='Vue Liste']");
   await until(() => document.querySelectorAll(".sly-media-row-main:not(:disabled)").length === 4, "Les épisodes ne sont pas directement accessibles");
   await until(() => Boolean(document.querySelector(".sly-media-thumbnail.is-ready")), "Vignette vidéo absente");
   assert(document.querySelectorAll("video").length === 0, "Un lecteur de vignette reste actif");
@@ -83,8 +88,9 @@ async function run() {
   click(nextButton);
   await until(async () => (await invoke("metrics") as { calls: { fileIndex: number; purpose: string }[] }).calls.some((call) => call.fileIndex === 2 && call.purpose === "playback"), "Préparation différée non démarrée");
   assert(Boolean(document.querySelector("dialog")), "Dialogue absent pendant la préparation");
+  await until(() => Boolean(document.querySelector("dialog")?.textContent?.includes("42 %")), "Progression de la conversion absente");
   click(closeButton);
-  await sleep(1000);
+  await sleep(2500);
   assert(!document.querySelector("dialog"), "Le chargement terminé rouvre le lecteur fermé");
   await until(async () => (await invoke("metrics") as { outstanding: number }).outstanding === 0, "Accès média non libérés");
   const completed = [...document.querySelectorAll<HTMLButtonElement>(".sly-media-filter-tabs button")].find((item) => item.textContent === "Terminés")!;

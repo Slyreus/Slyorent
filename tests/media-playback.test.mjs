@@ -77,3 +77,17 @@ test("libérer une préparation remplacée sans couper la lecture courante", asy
   assert.equal(api.released.includes(access("c").url), false);
   session.dispose();
 });
+
+test("suivre uniquement la préparation active de l’épisode demandé", async () => {
+  const api = bridge(), waiting = deferred();
+  api.openMedia = (options) => { api.calls.push(options); return waiting.promise; };
+  api.mediaPreparation = async (id) => { assert.equal(id, api.calls[0].requestId); return { stage: "video", percent: 42 }; };
+  const session = new MediaPlaybackSession(api);
+  const opening = session.take(episode());
+  assert.deepEqual(await session.progress(episode().key), { stage: "video", percent: 42 });
+  assert.equal(await session.progress(episode(1).key), null);
+  waiting.resolve(access());
+  await opening;
+  assert.equal(await session.progress(episode().key), null);
+  session.dispose();
+});

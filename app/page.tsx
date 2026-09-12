@@ -13,6 +13,7 @@ import {
 import { MediaLibraryView } from "./components/MediaLibrary";
 import { StrategicPeerMap, type StrategicLocalNode } from "./components/StrategicPeerMap";
 import { inspectMagnet, type AnalysisResult } from "../lib/magnet";
+import { RefreshQueue } from "../lib/refresh-queue";
 
 type View = "dashboard" | "add" | "transfers" | "library" | "map" | "security" | "audit";
 type Notice = { tone: "success" | "error" | "info"; message: string };
@@ -223,6 +224,7 @@ export default function Home() {
   const [auditEntries, setAuditEntries] = useState<UiAuditEntry[]>([]);
   const [peerSnapshot, setPeerSnapshot] = useState<SecuTorrentPeerSnapshot | null>(null);
   const peerSnapshotInFlight = useRef(false);
+  const refreshQueue = useRef(new RefreshQueue());
   const [mapError, setMapError] = useState("");
   const [localNode, setLocalNode] = useState<StrategicLocalNode | null>(null);
   const [locating, setLocating] = useState(false);
@@ -280,14 +282,16 @@ export default function Home() {
     return () => { disposed = true; unsubscribe(); };
   }, [importOpen, externalImport, busy, policyTarget, globalPolicyOpen]);
 
-  const refresh = useCallback(async (silent = false) => {
+  const refresh = useCallback(async (silent = false, fresh = !silent) => {
     if (!silent) setLoading(true);
     try {
-      const api = getBridge();
-      const [nextDaemon, nextTorrents, nextGlobalSharing] = await Promise.all([api.status(), api.list(), api.globalSharing()]);
-      setDaemon(normalizeStatus(nextDaemon));
-      setTorrents(Array.isArray(nextTorrents) ? nextTorrents : []);
-      setGlobalSharing(nextGlobalSharing);
+      await refreshQueue.current.run(async () => {
+        const api = getBridge();
+        const [nextDaemon, nextTorrents, nextGlobalSharing] = await Promise.all([api.status(), api.list(), api.globalSharing()]);
+        setDaemon(normalizeStatus(nextDaemon));
+        setTorrents(Array.isArray(nextTorrents) ? nextTorrents : []);
+        setGlobalSharing(nextGlobalSharing);
+      }, fresh);
     } catch (error) {
       setDaemon({ ready: false, state: "Moteur indisponible", error: readableError(error) });
       if (!silent) notify("error", readableError(error));
@@ -419,7 +423,7 @@ export default function Home() {
 
   async function runAction(key: string, action: () => Promise<unknown>, success: string) {
     setBusy(key);
-    try { await action(); notify("success", success); await refresh(true); if (activeView === "audit") await loadAudit(); return true; }
+    try { await action(); notify("success", success); await refresh(true, true); if (activeView === "audit") await loadAudit(); return true; }
     catch (error) { notify("error", readableError(error)); return false; }
     finally { setBusy(null); }
   }
@@ -488,7 +492,7 @@ export default function Home() {
       });
       if (result && typeof result === "object" && "canceled" in result && result.canceled) notify("info", "Import annulé.");
       else { notify("success", "Fichier .torrent importé en pause."); setActiveView("transfers"); }
-      await refresh(true);
+      await refresh(true, true);
     } catch (error) { notify("error", readableError(error)); }
     finally { await closeImport(); setBusy(null); }
   }
@@ -554,7 +558,7 @@ export default function Home() {
         result.restartRequired ? "info" : "success",
         result.restartRequired ? `${success} Redémarrage requis pour les créneaux d’envoi.` : success,
       );
-      await refresh(true);
+      await refresh(true, true);
       if (activeView === "audit") await loadAudit();
     } catch (error) {
       notify("error", readableError(error));
@@ -607,13 +611,13 @@ export default function Home() {
   return <div className="secu-shell">
     <a className="skip-link" href="#main-content">Aller au contenu</a>
     <aside className="sidebar">
-      <button className="brand" type="button" onClick={() => setActiveView("dashboard")} aria-label="Slyorrent, accueil"><span className="brand-mark"><img src="./slyorus.png" alt="" /></span><span><strong>Slyorrent</strong><small>Protection Slyorus</small></span></button>
+      <button className="brand" type="button" onClick={() => setActiveView("dashboard")} aria-label="Slyorrent, accueil"><span className="brand-mark brand-mark-logo"><img src="./slyorrent-logo.png" alt="" /></span><span><strong>Slyorrent</strong><small>Protection Slyorus</small></span></button>
       <nav aria-label="Navigation principale">{navItems.map((item) => { const Icon = item.icon; return <button key={item.id} type="button" className={activeView === item.id ? "active" : ""} onClick={() => setActiveView(item.id)} aria-current={activeView === item.id ? "page" : undefined}><Icon size={18} /><span>{item.label}</span>{item.id === "security" && stats.warnings > 0 && <em>{stats.warnings}</em>}</button>; })}</nav>
       <div className={`daemon-card ${daemon.ready ? "ready" : "offline"}`}><span className="daemon-orb"><RadioTower size={18} /></span><div><strong>{daemon.ready ? "Moteur local prêt" : "Moteur hors ligne"}</strong><small>{daemon.version ? `Transmission ${daemon.version}` : daemon.state}</small></div><i /></div>
     </aside>
 
     <main className="workspace" id="main-content" tabIndex={-1}>
-      <header className="topbar"><div className="mobile-brand"><img src="./slyorus.png" alt="" /><b>Slyorrent</b></div><label className="search-box"><Search size={16} /><span className="sr-only">Rechercher</span><input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Rechercher…" /><kbd>Ctrl K</kbd></label><div className="top-status"><span className={daemon.ready ? "connected" : "disconnected"} /><div><b>{daemon.ready ? "Local" : "Hors ligne"}</b><small>{daemon.ready ? "Cloud désactivé" : "Moteur arrêté"}</small></div></div><button className="icon-button" type="button" disabled={loading} onClick={() => void refresh()} aria-label="Actualiser"><RefreshCw className={loading ? "spin" : ""} size={17} /></button></header>
+      <header className="topbar"><div className="mobile-brand"><img className="brand-logo" src="./slyorrent-logo.png" alt="" /><b>Slyorrent</b></div><label className="search-box"><Search size={16} /><span className="sr-only">Rechercher</span><input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Rechercher…" /><kbd>Ctrl K</kbd></label><div className="top-status"><span className={daemon.ready ? "connected" : "disconnected"} /><div><b>{daemon.ready ? "Local" : "Hors ligne"}</b><small>{daemon.ready ? "Cloud désactivé" : "Moteur arrêté"}</small></div></div><button className="icon-button" type="button" disabled={loading} onClick={() => void refresh()} aria-label="Actualiser"><RefreshCw className={loading ? "spin" : ""} size={17} /></button></header>
 
       {!daemon.ready && <section className="offline-banner" role="alert"><ShieldAlert size={22} /><div><strong>Moteur P2P indisponible</strong><p>{daemon.error || "Transferts suspendus."}</p></div><button type="button" onClick={() => void refresh()}>Réessayer</button></section>}
 
@@ -671,7 +675,7 @@ export default function Home() {
         <section className="panel transfer-list"><div className="list-head"><div><h2>{filtered.length} torrent{filtered.length > 1 ? "s" : ""}</h2><span>Actifs {stats.active} · ↓ {formatRate(stats.rateDownload)} · ↑ {formatRate(stats.rateUpload)} · total ↑ {formatBytes(stats.uploaded)}</span></div><span className="live-indicator"><i /> DIRECT</span></div>{filtered.length ? filtered.map((torrent) => <TransferRow key={torrent.id} torrent={torrent} />) : <EmptyState icon={HardDrive} title={query ? "Aucun résultat" : "File vide"} text={query ? "Aucun torrent correspondant." : "Les nouveaux torrents apparaissent ici en pause."} />}</section>
       </>}
 
-      {activeView === "library" && <MediaLibraryView torrents={torrents} downloadDirectory={daemon.downloadDir || ""} onDirectoryChanged={() => void refresh()} onNotice={notify} />}
+      {activeView === "library" && <MediaLibraryView torrents={torrents} initialQuery={query} onQueryChange={setQuery} downloadDirectory={daemon.downloadDir || ""} onDirectoryChanged={() => void refresh()} onNotice={notify} />}
 
       {activeView === "map" && <>
         <ViewHeader
@@ -703,7 +707,7 @@ export default function Home() {
       <section className="dialog" role="dialog" aria-modal="true" aria-labelledby="import-title">
         <header><div><span className="eyebrow">IMPORT LOCAL</span><h2 id="import-title">Fichier .torrent</h2></div><button className="icon-button" type="button" onClick={closeImport} aria-label="Fermer"><X size={17} /></button></header>
         <div className="dialog-body import-dialog-body">
-          <span className="dialog-owl"><img src="./slyorus.png" alt="" /></span>
+          <span className="dialog-owl brand-mark-logo"><img src="./slyorrent-logo.png" alt="" /></span>
           {externalImport ? <p className="external-import-name"><b>{externalImport.name}</b><br />{formatBytes(externalImport.size)} · Ouvert depuis Windows · Ajout en pause</p> : <p>Contrôle local puis ajout en pause.</p>}
           <DestinationControl
             id="import"

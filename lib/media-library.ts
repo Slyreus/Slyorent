@@ -9,6 +9,7 @@ export type MediaFileInput = {
 };
 
 export type MediaTorrentInput = {
+  addedAt?: number;
   id: number;
   hash?: string;
   name: string;
@@ -30,6 +31,7 @@ export type ParsedMediaIdentity = {
 };
 
 export type MediaEpisode = ParsedMediaIdentity & {
+  addedAt?: number;
   key: string;
   watchKey: string;
   torrentId: number;
@@ -164,6 +166,10 @@ function folded(value: string) {
   return value.normalize("NFD").replace(/\p{M}/gu, "").toLocaleLowerCase("fr");
 }
 
+export function canonicalMediaTitle(value: string) {
+  return folded(value.replace(/\b(?:and|et)\b|&/giu, " et ")).replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+}
+
 function compareNullableNumber(left: number | null, right: number | null) {
   if (left === right) return 0;
   if (left === null) return 1;
@@ -189,6 +195,7 @@ export function buildMediaLibrary(torrents: readonly MediaTorrentInput[], query 
           watchKey: `${torrent.hash || `local-${torrent.id}`}:${file.index}`,
           torrentId: torrent.id,
           torrentName: torrent.name,
+          addedAt: Number.isFinite(torrent.addedAt) ? torrent.addedAt : 0,
           fileIndex: file.index,
           fileName: file.name,
           length: file.length,
@@ -267,7 +274,7 @@ export function flattenPlayableSeries(group: TorrentMediaGroup, seriesKey: strin
 /** Relier les saisons locales d'une série sans rejouer les copies du même épisode. */
 export function buildPlaybackQueue(episodes: readonly MediaEpisode[], current: MediaEpisode) {
   const episodic = current.episodeNumber !== null;
-  const candidates = episodes.filter((episode) => episode.playable && episode.kind === current.kind && folded(episode.seriesTitle) === folded(current.seriesTitle)
+  const candidates = episodes.filter((episode) => episode.playable && episode.kind === current.kind && canonicalMediaTitle(episode.seriesTitle) === canonicalMediaTitle(current.seriesTitle)
     && (episodic ? episode.episodeNumber !== null : episode.torrentId === current.torrentId));
   const selected = new Map<string, MediaEpisode>();
   for (const episode of candidates) {

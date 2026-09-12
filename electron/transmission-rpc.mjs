@@ -1,5 +1,38 @@
 const MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
 
+async function discardBody(response) {
+  await response.body?.cancel().catch(() => undefined);
+}
+
+async function readBoundedResponse(response) {
+  const tooLarge = () => new TransmissionRpcError("Réponse Transmission trop volumineuse.", "RESPONSE_TOO_LARGE");
+  const declaredSize = response.headers.get("content-length");
+  if (declaredSize && /^\d+$/.test(declaredSize) && Number(declaredSize) > MAX_RESPONSE_BYTES) {
+    await discardBody(response);
+    throw tooLarge();
+  }
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_RESPONSE_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        throw tooLarge();
+      }
+      chunks.push(value);
+    }
+    return Buffer.concat(chunks, total).toString("utf8");
+  } catch (error) {
+    if (error instanceof TransmissionRpcError) throw error;
+    throw new TransmissionRpcError("Réponse Transmission interrompue ou expirée.", "UNAVAILABLE");
+  } finally { reader.releaseLock(); }
+}
+
 export class TransmissionRpcError extends Error {
   constructor(message, code = "RPC_ERROR") {
     super(message);
@@ -24,6 +57,7 @@ export class TransmissionRpcClient {
     if (!/^[a-z][a-z0-9_]{1,80}$/.test(method)) throw new TransmissionRpcError("Méthode RPC invalide.", "INVALID_METHOD");
     const requestId = ++this.#tag;
     const payload = JSON.stringify({ jsonrpc: "2.0", method, params: args, id: requestId });
+    const signal = AbortSignal.timeout(timeoutMs);
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
       let response;
@@ -31,7 +65,7 @@ export class TransmissionRpcClient {
         response = await fetch(this.#endpoint, {
           method: "POST",
           redirect: "error",
-          signal: AbortSignal.timeout(timeoutMs),
+          signal,
           headers: {
             Authorization: this.#authorization,
             "Content-Type": "application/json",
@@ -45,15 +79,21 @@ export class TransmissionRpcClient {
 
       if (response.status === 409) {
         const sessionId = response.headers.get("x-transmission-session-id");
+        await discardBody(response);
         if (!sessionId || sessionId.length > 512) throw new TransmissionRpcError("Jeton de session Transmission absent.", "BAD_SESSION");
         this.#sessionId = sessionId;
         continue;
       }
-      if (response.status === 401 || response.status === 403) throw new TransmissionRpcError("Authentification Transmission refusée.", "AUTH_FAILED");
-      if (!response.ok) throw new TransmissionRpcError(`Transmission a répondu HTTP ${response.status}.`, "HTTP_ERROR");
+      if (response.status === 401 || response.status === 403) {
+        await discardBody(response);
+        throw new TransmissionRpcError("Authentification Transmission refusée.", "AUTH_FAILED");
+      }
+      if (!response.ok) {
+        await discardBody(response);
+        throw new TransmissionRpcError(`Transmission a répondu HTTP ${response.status}.`, "HTTP_ERROR");
+      }
 
-      const text = await response.text();
-      if (Buffer.byteLength(text, "utf8") > MAX_RESPONSE_BYTES) throw new TransmissionRpcError("Réponse Transmission trop volumineuse.", "RESPONSE_TOO_LARGE");
+      const text = await readBoundedResponse(response);
       let decoded;
       try { decoded = JSON.parse(text); } catch { throw new TransmissionRpcError("Réponse Transmission invalide.", "INVALID_RESPONSE"); }
       if (decoded?.jsonrpc !== "2.0" || decoded?.id !== requestId) throw new TransmissionRpcError("Enveloppe JSON-RPC Transmission invalide.", "INVALID_RESPONSE");

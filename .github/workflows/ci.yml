@@ -70,3 +70,15 @@ jobs:
 
       - name: Vérifier et tester
         run: npm run check
+
+      - name: Empaqueter l'application
+        run: npx electron-builder --win dir --x64 --publish never
+
+      - name: Tester la médiathèque et le lecteur
+        run: npm run test:catalog-ui && npm run test:media-ui
+
+      - name: Vérifier le contenu du paquet
+        run: npm run guard:release
+
+      - name: Tester le lecteur empaqueté
+        run: npm run test:packaged-media

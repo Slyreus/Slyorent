@@ -4,6 +4,14 @@ import { Readable } from "node:stream";
 
 const TOKEN_TTL_MS = 15 * 60_000;
 const MAX_RANGE_HEADER_LENGTH = 128;
+const MAX_MEDIA_TOKENS = 256;
+
+function tokenFromUrl(value) {
+  const url = new URL(value);
+  const token = url.pathname.slice(1);
+  if (url.protocol !== "secutorrent-media:" || url.hostname !== "stream" || url.port || url.search || url.hash || url.username || url.password || !/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
+  return token;
+}
 
 const MEDIA_TYPES = new Map([
   [".mp4", "video/mp4"],
@@ -84,18 +92,25 @@ export class MediaVault {
 
   issue({ filePath, torrentKey, ownerWebContentsId, mimeType, name, expectedSize, expectedMtimeMs }) {
     this.prune();
+    if (this.#tokens.size >= MAX_MEDIA_TOKENS) throw new Error("Trop d’accès média ouverts.");
     const token = randomBytes(32).toString("base64url");
     const expiresAt = this.#now() + TOKEN_TTL_MS;
-    this.#tokens.set(token, { filePath, torrentKey, ownerWebContentsId, mimeType, name, expectedSize, expectedMtimeMs, expiresAt });
+    this.#tokens.set(token, { filePath, torrentKey, ownerWebContentsId, mimeType, name, expectedSize, expectedMtimeMs, expiresAt, streams: new Set() });
     return { url: `secutorrent-media://stream/${token}`, expiresAt: new Date(expiresAt).toISOString(), mimeType, name };
   }
 
   revokeTorrent(torrentKey) {
-    for (const [token, entry] of this.#tokens) if (entry.torrentKey === torrentKey) this.#tokens.delete(token);
+    for (const [token, entry] of this.#tokens) if (entry.torrentKey === torrentKey) this.#revoke(token);
   }
 
   revokeOwner(ownerWebContentsId) {
-    for (const [token, entry] of this.#tokens) if (entry.ownerWebContentsId === ownerWebContentsId) this.#tokens.delete(token);
+    for (const [token, entry] of this.#tokens) if (entry.ownerWebContentsId === ownerWebContentsId) this.#revoke(token);
+  }
+
+  #revoke(token) {
+    const entry = this.#tokens.get(token);
+    this.#tokens.delete(token);
+    for (const stream of entry?.streams || []) stream.destroy(new Error("Accès média révoqué."));
   }
 
   isFileInUse(filePath) {
@@ -105,12 +120,10 @@ export class MediaVault {
 
   #ownedEntry(url, ownerWebContentsId) {
     this.prune();
-    let parsed;
-    try { parsed = new URL(url); } catch { throw new Error("Accès média invalide."); }
-    const token = parsed.pathname.slice(1);
+    let token;
+    try { token = tokenFromUrl(url); } catch { throw new Error("Accès média invalide."); }
     const entry = this.#tokens.get(token);
-    if (parsed.protocol !== "secutorrent-media:" || parsed.hostname !== "stream" || parsed.port || parsed.search || parsed.hash || parsed.username || parsed.password
-      || !entry || entry.ownerWebContentsId !== ownerWebContentsId) throw new Error("Accès média expiré ou refusé.");
+    if (!entry || entry.ownerWebContentsId !== ownerWebContentsId) throw new Error("Accès média expiré ou refusé.");
     return { token, entry };
   }
 
@@ -120,43 +133,46 @@ export class MediaVault {
     try {
       const info = await handle.stat();
       if (!info.isFile() || info.size !== entry.expectedSize || info.mtimeMs !== entry.expectedMtimeMs) {
-        this.#tokens.delete(token);
+        this.#revoke(token);
         throw new Error("Le média a changé depuis sa validation.");
       }
+      if (this.#tokens.get(token) !== entry) throw new Error("Accès média révoqué.");
       entry.expiresAt = this.#now() + TOKEN_TTL_MS;
       return { expiresAt: new Date(entry.expiresAt).toISOString() };
     } finally { await handle.close(); }
   }
 
   release(url, ownerWebContentsId) {
-    try { this.#tokens.delete(this.#ownedEntry(url, ownerWebContentsId).token); } catch { /* Un accès expiré est déjà révoqué. */ }
+    try { this.#revoke(this.#ownedEntry(url, ownerWebContentsId).token); } catch { /* Un accès expiré est déjà révoqué. */ }
     return { ok: true };
   }
 
   prune() {
     const now = this.#now();
-    for (const [token, entry] of this.#tokens) if (entry.expiresAt <= now) this.#tokens.delete(token);
+    for (const [token, entry] of this.#tokens) if (entry.expiresAt <= now) this.#revoke(token);
   }
 
   async handle(request) {
+    let fileHandle;
     try {
       this.prune();
-      const url = new URL(request.url);
-      const token = url.hostname === "stream" ? url.pathname.slice(1) : "";
+      const token = tokenFromUrl(request.url);
       const entry = this.#tokens.get(token);
-      if (!entry || !/^[A-Za-z0-9_-]{43}$/.test(token)) return new Response(null, { status: 404 });
+      if (!entry) return new Response(null, { status: 404 });
       if (Number.isInteger(request.webContentsId) && request.webContentsId > 0 && request.webContentsId !== entry.ownerWebContentsId) return new Response(null, { status: 403 });
+      if (request.method !== "GET" && request.method !== "HEAD") return new Response(null, { status: 405, headers: { Allow: "GET, HEAD" } });
+      if (request.signal?.aborted) return new Response(null, { status: 408 });
 
-      const fileHandle = await open(entry.filePath, "r");
+      fileHandle = await open(entry.filePath, "r");
       const file = await fileHandle.stat();
+      if (this.#tokens.get(token) !== entry) return new Response(null, { status: 404 });
+      if (request.signal?.aborted) return new Response(null, { status: 408 });
       if (!file.isFile() || file.size <= 0 || file.size !== entry.expectedSize || file.mtimeMs !== entry.expectedMtimeMs) {
-        await fileHandle.close();
-        this.#tokens.delete(token);
+        this.#revoke(token);
         return new Response(null, { status: 409 });
       }
       const range = parseRange(request.headers.get("range"), file.size);
       if (!range) {
-        await fileHandle.close();
         return new Response(null, { status: 416, headers: { "Content-Range": `bytes */${file.size}` } });
       }
       const contentLength = range.end - range.start + 1;
@@ -170,21 +186,18 @@ export class MediaVault {
       };
       if (range.partial) headers["Content-Range"] = `bytes ${range.start}-${range.end}/${file.size}`;
       if (request.method === "HEAD") {
-        await fileHandle.close();
         return new Response(null, { status: range.partial ? 206 : 200, headers });
       }
-      if (request.method !== "GET") {
-        await fileHandle.close();
-        return new Response(null, { status: 405, headers: { Allow: "GET, HEAD" } });
-      }
       const stream = fileHandle.createReadStream({ start: range.start, end: range.end, autoClose: true });
+      fileHandle = null; // Le flux devient responsable de la fermeture du fichier.
+      entry.streams.add(stream);
       entry.expiresAt = this.#now() + TOKEN_TTL_MS;
-      const abort = () => stream.destroy();
+      const abort = () => stream.destroy(new Error("Lecture annulée."));
       request.signal?.addEventListener("abort", abort, { once: true });
-      stream.once("close", () => request.signal?.removeEventListener("abort", abort));
+      stream.once("close", () => { entry.streams.delete(stream); request.signal?.removeEventListener("abort", abort); });
       return new Response(Readable.toWeb(stream), { status: range.partial ? 206 : 200, headers });
     } catch {
       return new Response(null, { status: 404 });
-    }
+    } finally { await fileHandle?.close().catch(() => undefined); }
   }
 }

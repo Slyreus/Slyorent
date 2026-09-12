@@ -14,7 +14,7 @@ const DEFAULT_VERIFICATION_TIMEOUT_MS = 12 * 60 * 60 * 1_000;
 const DEFAULT_VERIFICATION_POLL_MS = 250;
 const DEFAULT_MOVE_TIMEOUT_MS = 30 * 60 * 1_000;
 const TORRENT_FIELDS = [
-  "id", "hash_string", "name", "status", "percent_done", "metadata_percent_complete",
+  "id", "hash_string", "name", "status", "percent_done", "metadata_percent_complete", "added_date",
   "rate_download", "rate_upload", "eta", "upload_ratio", "uploaded_ever", "downloaded_ever",
   "seconds_seeding", "size_when_done", "peers_connected", "error_string", "is_private",
   "download_dir", "files", "file_stats", "trackers", "peers", "recheck_progress",
@@ -563,6 +563,7 @@ export class TorrentService {
     const normalized = this.#sharingHash(hash);
     if (!normalized) throw new Error("Infohash invalide pour la quarantaine de partage.");
     this.#sharingQuarantine.set(normalized, { hash: normalized, blockedAt: new Date().toISOString(), reason: reason === "scan-pending" ? "scan-pending" : "scan-failed" });
+    this.#mediaVault.revokeTorrent(normalized);
     await this.#writeSharingQuarantine();
   }
 
@@ -1027,6 +1028,7 @@ export class TorrentService {
       id: Number(torrent.id),
       hash: String(torrent.hash_string || ""),
       name: safeName(torrent.name),
+      addedAt: boundedNumber(torrent.added_date, 0, 0, Date.now() / 1000 + 86400, true) * 1000,
       status: STATUS_NAMES.get(Number(torrent.status)) || "unknown",
       percentDone: Number(torrent.percent_done || 0),
       metadataPercentComplete: Number(torrent.metadata_percent_complete || 0),
@@ -1553,7 +1555,7 @@ export class TorrentService {
 
   cancelMediaPreparation(requestId, ownerWebContentsId) {
     const key = this.#mediaRequestKey(requestId, ownerWebContentsId);
-    this.#mediaPreparations.get(key)?.abort();
+    this.#mediaPreparations.get(key)?.controller.abort();
     this.#mediaCancellations.set(key, Date.now());
     for (const [candidate, timestamp] of this.#mediaCancellations) if (timestamp < Date.now() - 60_000) this.#mediaCancellations.delete(candidate);
     while (this.#mediaCancellations.size > 256) this.#mediaCancellations.delete(this.#mediaCancellations.keys().next().value);
@@ -1561,20 +1563,32 @@ export class TorrentService {
   }
 
   cancelMediaOwner(ownerWebContentsId) {
-    for (const [key, controller] of this.#mediaPreparations) if (key.startsWith(`${ownerWebContentsId}:`)) controller.abort();
+    for (const [key, job] of this.#mediaPreparations) if (key.startsWith(`${ownerWebContentsId}:`)) job.controller.abort();
+  }
+
+  mediaPreparation(requestId, ownerWebContentsId) {
+    const job = this.#mediaPreparations.get(this.#mediaRequestKey(requestId, ownerWebContentsId));
+    return job && !job.controller.signal.aborted ? { ...job.progress } : null;
   }
 
   async openMedia({ requestId = randomUUID(), ...options }, ownerWebContentsId) {
     const key = this.#mediaRequestKey(requestId, ownerWebContentsId);
     if (this.#mediaPreparations.has(key)) throw new Error("Requête média déjà en cours.");
+    if (this.#mediaPreparations.size >= 12) throw Object.assign(new Error("Trop de médias en préparation. Fermez un lecteur puis réessayez."), { code: "MEDIA_PREPARATION_BUSY" });
     const controller = new AbortController();
     if ((this.#mediaCancellations.get(key) || 0) > Date.now() - 60_000) controller.abort();
-    this.#mediaPreparations.set(key, controller);
-    try { return await this.#openMedia(options, ownerWebContentsId, controller.signal); }
+    const job = { controller, progress: { stage: "probe", percent: null } };
+    this.#mediaPreparations.set(key, job);
+    const onProgress = (progress) => {
+      if (controller.signal.aborted) return;
+      if (!["probe", "queued", "video", "audio", "finalizing", "scan", "ready"].includes(progress.stage)) return;
+      job.progress = { stage: progress.stage, percent: Number.isFinite(progress.percent) ? Math.max(0, Math.min(100, Math.floor(progress.percent))) : null, hardware: progress.hardware === true };
+    };
+    try { return await this.#openMedia(options, ownerWebContentsId, controller.signal, onProgress); }
     finally { this.#mediaPreparations.delete(key); }
   }
 
-  async #openMedia({ id, fileIndex, purpose = "playback" }, ownerWebContentsId, signal) {
+  async #openMedia({ id, fileIndex, purpose = "playback" }, ownerWebContentsId, signal, onProgress) {
     signal.throwIfAborted();
     const raw = await this.#rawTorrent(assertTorrentId(id));
     if (this.#isSharingProtected(raw)) throw new Error("Le média est bloqué pendant le contrôle de sécurité.");
@@ -1600,18 +1614,22 @@ export class TorrentService {
     let audioAdapted = false;
     let audioCodec = null;
     let audioLanguage = null;
-    if (purpose === "playback" && this.#mediaAdapter && mimeType === "video/x-matroska") {
-      await this.#audit.append("media.audio_adaptation_started", { torrentId: id, fileIndex });
-      const adapted = await this.#mediaAdapter.prepare({ sourcePath: filePath, sourceSize: record.size, sourceMtimeMs: record.mtimeMs, signal });
+    let videoAdapted = false;
+    let videoCodec = null;
+    if (purpose === "playback" && this.#mediaAdapter && ["video/x-matroska", "video/mp4", "video/webm"].includes(mimeType)) {
+      await this.#audit.append("media.preparation_started", { torrentId: id, fileIndex });
+      const adapted = await this.#mediaAdapter.prepare({ sourcePath: filePath, sourceSize: record.size, sourceMtimeMs: record.mtimeMs, signal, onProgress });
       signal.throwIfAborted();
       if (adapted) {
+        onProgress({ stage: "scan", percent: null });
         const adaptedScan = this.#adaptedScanRecords.get(adapted.filePath);
         if (!adaptedScan || adaptedScan.size !== adapted.size || adaptedScan.mtimeMs !== adapted.mtimeMs) {
           const scanKey = JSON.stringify([adapted.filePath, adapted.size, adapted.mtimeMs]);
           if (!this.#adaptedScansPending.has(scanKey)) {
             const task = this.#scanFile(adapted.filePath).then((clean) => {
-              if (clean.size !== adapted.size || clean.mtimeMs !== adapted.mtimeMs) throw new Error("La version audio compatible a changé pendant son analyse.");
+              if (clean.size !== adapted.size || clean.mtimeMs !== adapted.mtimeMs) throw new Error("La version compatible a changé pendant son analyse.");
               this.#adaptedScanRecords.set(adapted.filePath, { size: clean.size, mtimeMs: clean.mtimeMs });
+              while (this.#adaptedScanRecords.size > 256) this.#adaptedScanRecords.delete(this.#adaptedScanRecords.keys().next().value);
             }).finally(() => this.#adaptedScansPending.delete(scanKey));
             this.#adaptedScansPending.set(scanKey, task);
           }
@@ -1621,25 +1639,28 @@ export class TorrentService {
         servedSize = adapted.size;
         servedMtimeMs = adapted.mtimeMs;
         mimeType = await validateMediaSignature(servedPath);
-        audioAdapted = true;
+        audioAdapted = adapted.audioAdapted;
         audioCodec = adapted.audioCodec;
         audioLanguage = adapted.audioLanguage;
-        await this.#audit.append("media.audio_adaptation_ready", { torrentId: id, fileIndex, cacheHit: adapted.cacheHit, audioCodec, audioLanguage });
+        videoAdapted = adapted.videoAdapted === true;
+        videoCodec = adapted.videoCodec || null;
+        await this.#audit.append("media.preparation_ready", { torrentId: id, fileIndex, cacheHit: adapted.cacheHit, audioCodec, audioLanguage, videoAdapted, videoCodec });
       }
     }
     const sourceAfter = await stat(filePath);
     signal.throwIfAborted();
-    if (this.#scanRecords.get(key) !== record || sourceAfter.size !== record.size || sourceAfter.mtimeMs !== record.mtimeMs) throw new Error("La validation du média a changé pendant son ouverture.");
+    if (this.#isSharingProtected(raw) || this.#scanRecords.get(key) !== record || sourceAfter.size !== record.size || sourceAfter.mtimeMs !== record.mtimeMs) throw new Error("La validation du média a changé pendant son ouverture.");
     const issued = this.#mediaVault.issue({
       filePath: servedPath,
       torrentKey: raw.hash_string,
       ownerWebContentsId,
       mimeType,
-      name: safeName(audioAdapted ? `${path.parse(file.name).name}.aac.mp4` : path.basename(file.name), "Média"),
+      name: safeName(audioAdapted || videoAdapted ? `${path.parse(file.name).name}.compatible.mp4` : path.basename(file.name), "Média"),
       expectedSize: servedSize,
       expectedMtimeMs: servedMtimeMs,
     });
     await this.#audit.append("media.access_issued", { torrentId: id, fileIndex, expiresAt: issued.expiresAt });
-    return { ...issued, audioAdapted, audioCodec, audioLanguage };
+    onProgress({ stage: "ready", percent: 100 });
+    return { ...issued, audioAdapted, audioCodec, audioLanguage, videoAdapted, videoCodec };
   }
 }

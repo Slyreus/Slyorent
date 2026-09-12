@@ -40,3 +40,6 @@ body{min-width:320px;background:radial-gradient(circle at 75% -10%,rgba(36,210,2
 @media(max-width:900px){.global-sharing-panel{align-items:flex-start;flex-direction:column}.global-sharing-actions{width:100%;justify-content:flex-start}.sharing-diagnostics{grid-template-columns:1fr}.sharing-diagnostics>div{padding:0 0 10px;border-right:0;border-bottom:1px solid rgba(255,255,255,.1)}.sharing-diagnostics>div:last-child{padding-bottom:0;border-bottom:0}}
 @media(max-width:680px){.global-sharing-panel{padding:15px}.global-sharing-actions{display:grid;grid-template-columns:1fr 1fr}.global-sharing-actions button{width:100%;padding-inline:8px}.sharing-diagnostics{padding:13px}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition:none!important}}
+
+.brand-mark-logo{padding:0;border:0;background:transparent;box-shadow:none}
+.brand-mark-logo img,.mobile-brand img.brand-logo{object-fit:contain;border-radius:0}

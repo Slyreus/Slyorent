@@ -27,6 +27,25 @@ test("limiter l'annulation d'une préparation à sa fenêtre", async () => {
   assert.ok(calls.length > 0);
 });
 
+test("isoler la progression et borner les préparations média simultanées", async () => {
+  let finish;
+  const waiting = new Promise((resolve) => { finish = resolve; });
+  const { service, manager } = statefulHarness();
+  manager.rpc.call = () => waiting;
+  const requests = Array.from({ length: 12 }, (_, index) => `11111111-1111-4111-8111-${String(index).padStart(12, "0")}`);
+  const pending = requests.map((requestId) => service.openMedia({ id: 1, fileIndex: 0, requestId }, 42).catch(() => null));
+  assert.deepEqual(service.mediaPreparation(requests[0], 42), { stage: "probe", percent: null });
+  assert.equal(service.mediaPreparation(requests[0], 43), null);
+  service.mediaPreparation(requests[0], 42).stage = "ready";
+  assert.equal(service.mediaPreparation(requests[0], 42).stage, "probe");
+  await assert.rejects(service.openMedia({ id: 1, fileIndex: 0 }, 42), { code: "MEDIA_PREPARATION_BUSY" });
+  service.cancelMediaOwner(42);
+  assert.equal(service.mediaPreparation(requests[0], 42), null);
+  finish({ torrents: [rawTorrent()] });
+  await Promise.all(pending);
+  assert.equal(service.mediaPreparation(requests[1], 42), null);
+});
+
 function rawTorrent(overrides = {}) {
   return {
     id: 1,
@@ -108,6 +127,7 @@ function statefulHarness({
   verificationTimeoutMs,
   verificationPollMs,
   contentRegistry,
+  mediaAdapter,
 } = {}) {
   const calls = [];
   const events = [];
@@ -213,6 +233,7 @@ function statefulHarness({
       manager,
       audit,
       mediaVault,
+      mediaAdapter,
       ...(defenderHealthCheck ? { defenderHealthCheck } : {}),
       ...(scanFile ? { scanFile } : {}),
       ...(verificationTimeoutMs ? { verificationTimeoutMs } : {}),
@@ -252,6 +273,34 @@ async function cleanFileScan(filePath) {
   const info = await stat(filePath);
   return { size: info.size, mtimeMs: info.mtimeMs };
 }
+
+test("refuser une ouverture préparée pendant une nouvelle analyse de sécurité", async (t) => {
+  let prepared, completePreparation, completeHealth;
+  const started = new Promise((resolve) => { prepared = resolve; });
+  const preparing = new Promise((resolve) => { completePreparation = resolve; });
+  const blockedHealth = new Promise((resolve) => { completeHealth = resolve; });
+  let healthCalls = 0, issued = 0, revocations = 0;
+  const contents = Buffer.from([0, 0, 0, 16, 102, 116, 121, 112, 105, 115, 111, 109]);
+  const harness = await temporaryHarness(t, {
+    torrents: [rawTorrent({ percent_done: 1, files: [{ name: "video.mp4", length: contents.length, bytes_completed: contents.length }], file_stats: [{ wanted: true }] })],
+    scanFile: cleanFileScan,
+    defenderHealthCheck: async () => { if (++healthCalls > 1) await blockedHealth; return healthyDefender(); },
+    mediaAdapter: { prepare: async () => { prepared(); await preparing; return null; } },
+  });
+  await writeFile(path.join(harness.directory, "video.mp4"), contents);
+  harness.mediaVault.revokeTorrent = () => { revocations++; };
+  harness.mediaVault.issue = () => { issued++; throw new Error("Une ouverture bloquée ne doit pas émettre d’accès."); };
+  await harness.service.scan(1);
+  const opening = harness.service.openMedia({ id: 1, fileIndex: 0 }, 42);
+  await started;
+  const scanning = harness.service.scan(1);
+  completePreparation();
+  await assert.rejects(opening, /validation du média a changé/);
+  completeHealth();
+  await scanning;
+  assert.equal(issued, 0);
+  assert.ok(revocations >= 2);
+});
 
 function diagnosticTracker(overrides = {}) {
   return {

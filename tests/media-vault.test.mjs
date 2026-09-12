@@ -118,3 +118,36 @@ test("ne pas ressusciter un accès révoqué lors d'un contrôle de sécurité",
   vault.revokeTorrent("test");
   await assert.rejects(vault.renew(issued.url, 42), /refusé/);
 });
+
+test("arrêter un flux déjà ouvert lors de la révocation", async (t) => {
+  const { filePath } = await temporaryMedia(t);
+  await appendFile(filePath, Buffer.alloc(8 * 1024 * 1024));
+  const file = await stat(filePath);
+  const vault = new MediaVault();
+  for (const revoke of [() => vault.revokeTorrent("test"), () => vault.revokeOwner(42), (url) => vault.release(url, 42)]) {
+    const issued = vault.issue({ filePath, torrentKey: "test", ownerWebContentsId: 42, mimeType: "video/mp4", name: "media.mp4", expectedSize: file.size, expectedMtimeMs: file.mtimeMs });
+    const response = await vault.handle(ownedRequest(issued.url, 42));
+    const reader = response.body.getReader();
+    assert.equal((await reader.read()).done, false);
+    revoke(issued.url);
+    await assert.rejects(async () => { while (!(await reader.read()).done) { /* Vider les morceaux déjà livrés. */ } }, /révoqué/);
+    reader.releaseLock();
+    assert.equal((await vault.handle(ownedRequest(issued.url, 42))).status, 404);
+  }
+});
+
+test("refuser les variantes d’URL et les demandes déjà annulées", async (t) => {
+  const { filePath } = await temporaryMedia(t);
+  const file = await stat(filePath);
+  const vault = new MediaVault();
+  const issued = vault.issue({ filePath, torrentKey: "test", ownerWebContentsId: 42, mimeType: "video/mp4", name: "media.mp4", expectedSize: file.size, expectedMtimeMs: file.mtimeMs });
+  for (const url of [issued.url.replace("secutorrent-media:", "https:"), `${issued.url}?extra=1`, `${issued.url}#fragment`, issued.url.replace("stream/", "stream:1234/")]) {
+    assert.equal((await vault.handle(ownedRequest(url, 42))).status, 404);
+  }
+  assert.equal((await vault.handle(ownedRequest(issued.url, 42, { method: "POST" }))).status, 405);
+  assert.equal((await vault.handle(ownedRequest(issued.url, 42, { signal: AbortSignal.abort() }))).status, 408);
+  const head = await vault.handle(ownedRequest(issued.url, 42, { method: "HEAD" }));
+  assert.equal(head.status, 200);
+  assert.equal(head.body, null);
+  vault.revokeOwner(42);
+});

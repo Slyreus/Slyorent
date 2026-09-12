@@ -22,6 +22,7 @@ export function MediaPlayer({ episode, initialRecord, session, getBridge, previo
   const [source, setSource] = useState<MediaAccess | null>(null);
   const [resumePrompt, setResumePrompt] = useState(canResume(initialRecord));
   const [loading, setLoading] = useState(true);
+  const [preparation, setPreparation] = useState<SecuTorrentMediaPreparation | null>(null);
   const [buffering, setBuffering] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [position, setPosition] = useState(initialRecord?.position || 0);
@@ -85,6 +86,7 @@ export function MediaPlayer({ episode, initialRecord, session, getBridge, previo
       if (cancelled) { session.release(access); return; }
       sourceRef.current = access;
       setSource(access);
+      setPreparation(null);
     }).catch((caught: unknown) => {
       if (!cancelled) { setError(caught instanceof Error ? caught.message : "Média indisponible."); setLoading(false); }
     });
@@ -115,6 +117,8 @@ export function MediaPlayer({ episode, initialRecord, session, getBridge, previo
     }
     initialized.current = false;
     media?.pause();
+    setPlaying(false);
+    setPreparation(null);
     setLoading(true);
     setError("");
     try {
@@ -123,10 +127,27 @@ export function MediaPlayer({ episode, initialRecord, session, getBridge, previo
       if (sourceRef.current) session.release(sourceRef.current);
       sourceRef.current = access;
       setSource(access);
+      setPreparation(null);
     } catch (caught) {
       if (alive.current) { setError(caught instanceof Error ? caught.message : "Média indisponible."); setLoading(false); }
     } finally { recovering.current = false; }
   }, [episode, session, save]);
+
+  useEffect(() => {
+    if (!loading) return;
+    let stopped = false;
+    let polling = false;
+    const poll = async () => {
+      if (stopped || polling) return;
+      polling = true;
+      try { const progress = await session.progress(episode.key); if (!stopped && progress) setPreparation(progress); }
+      catch { /* L'ouverture conserve son propre diagnostic d'erreur. */ }
+      finally { polling = false; }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 750);
+    return () => { stopped = true; window.clearInterval(timer); };
+  }, [loading, episode.key, session]);
 
   useEffect(() => {
     if (!source) return;
@@ -240,6 +261,11 @@ export function MediaPlayer({ episode, initialRecord, session, getBridge, previo
   function close() { save(); onClose(); }
   function select(item: MediaEpisode) { save(); onSelect(item); }
   const expanded = fullscreen || fallbackFullscreen;
+  const preparationLabel = preparation ? {
+    probe: "Lecture des pistes…", queued: "Préparation en attente…",
+    video: "Conversion vidéo H.264", audio: "Préparation du son AAC",
+    finalizing: "Finalisation du fichier…", scan: "Analyse Microsoft Defender…", ready: "Ouverture du lecteur…",
+  }[preparation.stage] : "Ouverture du média…";
 
   return <dialog ref={dialogRef} className="sly-media-dialog" aria-labelledby="sly-media-player-title" onCancel={(event) => { event.preventDefault(); if (fallbackFullscreen) setFallbackFullscreen(false); else close(); }}>
     <div ref={frameRef} className={`sly-media-player ${fallbackFullscreen ? "is-fallback-fullscreen" : ""}`}>
@@ -256,11 +282,11 @@ export function MediaPlayer({ episode, initialRecord, session, getBridge, previo
             {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
             <audio key={source.url} ref={attachMedia} src={source.url} controls preload="auto" controlsList="nodownload" aria-label={`Lecture audio de ${episode.episodeTitle}`} {...events} />
           </div>)}
-        {resumePrompt && <div className="sly-media-player-overlay sly-media-resume-prompt"><Clock3 size={30} /><h3>Reprendre la lecture ?</h3><p>Arrêt à {formatMediaTime(initialRecord?.position || 0)} sur {formatMediaTime(initialRecord?.duration || 0)}</p><div><button type="button" className="sly-media-primary" onClick={() => chooseStart(initialRecord?.position || 0)}><CirclePlay size={17} /> Reprendre à {formatMediaTime(initialRecord?.position || 0)}</button><button type="button" onClick={() => chooseStart(0)}><RotateCcw size={15} /> Depuis le début</button></div></div>}
-        {!resumePrompt && (loading || buffering) && !error && <div className="sly-media-player-overlay sly-media-loading" role="status"><LoaderCircle size={28} className="sly-media-spin" /><span>{source ? "Chargement de la lecture…" : episode.extension === "mkv" ? "Préparation de la vidéo et de l’audio…" : "Ouverture du média…"}</span>{!source && episode.extension === "mkv" && <small>La première ouverture peut demander une conversion locale.</small>}</div>}
+        {resumePrompt && !error && <div className="sly-media-player-overlay sly-media-resume-prompt"><Clock3 size={30} /><h3>Reprendre la lecture ?</h3><p>Arrêt à {formatMediaTime(initialRecord?.position || 0)} sur {formatMediaTime(initialRecord?.duration || 0)}</p><div><button type="button" className="sly-media-primary" onClick={() => chooseStart(initialRecord?.position || 0)}><CirclePlay size={17} /> Reprendre à {formatMediaTime(initialRecord?.position || 0)}</button><button type="button" onClick={() => chooseStart(0)}><RotateCcw size={15} /> Depuis le début</button></div></div>}
+        {!resumePrompt && (loading || buffering) && !error && <div className="sly-media-player-overlay sly-media-loading" role="status"><LoaderCircle size={28} className="sly-media-spin" /><span>{source && !preparation ? "Chargement de la lecture…" : preparationLabel}</span>{preparation?.percent !== null && preparation?.percent !== undefined && <div className="sly-media-conversion-progress"><progress max={100} value={preparation.percent} aria-label="Préparation du média" /><b>{preparation.percent} %</b></div>}{!source && preparation?.stage === "video" && <small>{preparation.hardware ? "Accélération NVIDIA" : "Conversion sur le processeur"} · Original conservé</small>}{!source && <small>La copie compatible sera réutilisée aux prochaines lectures.</small>}</div>}
         {error && <div className="sly-media-player-overlay" role="alert"><p>{error}</p><button type="button" className="sly-media-primary" onClick={() => void recover(false)}><RotateCcw size={16} /> Réessayer</button></div>}
       </div>
-      <div className="sly-media-native-meta"><span className={playing ? "is-playing" : ""}>{playing ? "Lecture" : loading ? "Préparation" : "Pause"}</span><span><Clock3 size={14} /> {formatMediaTime(position)} / {formatMediaTime(duration)}</span><span>{source?.audioAdapted ? `Audio ${source.audioCodec || "AAC"} intégré${["fr", "fra", "fre", "french"].includes(source.audioLanguage || "") ? " · FR" : ""}` : "Audio du fichier"}</span></div>
+      <div className="sly-media-native-meta"><span className={playing ? "is-playing" : ""}>{error ? "Indisponible" : playing ? "Lecture" : loading ? "Préparation" : "Pause"}</span><span><Clock3 size={14} /> {formatMediaTime(position)} / {formatMediaTime(duration)}</span>{source && <span>{source.videoAdapted ? "Vidéo H.264 · " : ""}{source.audioAdapted ? `Audio ${source.audioCodec || "AAC"}${["fr", "fra", "fre", "french"].includes(source.audioLanguage || "") ? " · FR" : ""}` : "Audio du fichier"}</span>}</div>
       <footer><div className="sly-media-episode-nav"><button type="button" disabled={!previous} onClick={() => previous && select(previous)} aria-label="Épisode précédent"><SkipBack size={17} /> Précédent</button><button type="button" disabled={!next} onClick={() => next && select(next)} aria-label="Épisode suivant">Suivant <SkipForward size={17} />{nextReady && <span className="sly-media-next-ready">prêt</span>}</button></div><span className="sly-media-source-meta"><LockKeyhole size={14} /> Lecture et suivi locaux</span></footer>
       {saveError && <div className="sly-media-player-error" role="alert">{saveError}</div>}
     </div>
