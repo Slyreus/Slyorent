@@ -14,6 +14,8 @@ La médiathèque réunit les saisons d’une série, même quand elles viennent 
 
 La langue audio et les sous-titres se choisissent dans la barre du lecteur, à côté de Précédent et Suivant. En VO, le français s’active par défaut lorsqu’il est disponible. Les sous-titres texte intégrés ASS, SSA, SRT, WebVTT et mov_text sont pris en charge, mais pas encore les pistes sous forme d’images ni les fichiers de sous-titres séparés.
 
+Le bouton Caster permet de lancer la vidéo sur un Chromecast, une Google TV ou un appareil DLNA. Pour un autre écran, il y a un lecteur à ouvrir dans son navigateur, avec un code de connexion. Le PC garde les commandes, le suivi et l’option pour passer automatiquement à l’épisode suivant. Les appareils doivent être sur le même réseau privé et Slyorrent doit rester ouvert. Les fonctions DLNA varient selon la TV ; AirPlay et Miracast ne sont pas pris en charge. [Cast](docs/CAST.md) explique les limites et le réglage du pare-feu.
+
 Certains formats, comme le HEVC ou le son E-AC3, demandent une conversion pour le lecteur. Elle se fait sur le PC, sans modifier l’original. La première lecture peut prendre quelques minutes ; les suivantes réutilisent la copie en cache. Une carte NVIDIA compatible peut accélérer la conversion. Le cache est limité à 12 Go et les copies passent aussi par Defender.
 
 Pour le partage, tu peux définir des paramètres globaux, garder des limites par torrent ou tout arrêter. Le volume envoyé est affiché en plus du ratio. Le diagnostic permet de vérifier le port, les trackers et les connexions. Le moteur est Transmission 4.1.3 : le débit dépend aussi de la demande et des autres pairs. Aucun client ne peut garantir du partage ou des points sur un tracker.

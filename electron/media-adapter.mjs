@@ -105,13 +105,14 @@ function runProcess(executable, args, { timeoutMs, maxStdout = 0, maxStderr = MA
   });
 }
 
-function outputCacheKey({ sourcePath, sourceSize, sourceMtimeMs, videoIndex, audioIndex }) {
+function outputCacheKey({ sourcePath, sourceSize, sourceMtimeMs, videoIndex, audioIndex, cast }) {
   return createHash("sha256").update(JSON.stringify({
     sourcePath: path.resolve(sourcePath).toLowerCase(),
     sourceSize,
     sourceMtimeMs,
     videoIndex,
     audioIndex,
+    ...(cast ? { castProfile: "h264-aac-1080-v1" } : {}),
     ffmpeg: FFMPEG_SHA256,
     profile: MEDIA_CACHE_PROFILE,
   })).digest("hex");
@@ -157,7 +158,7 @@ export class MediaAdapter {
     const { stdout } = await runProcess(this.#ffprobe, [
       "-v", "error",
       ...localMediaInputArgs(sourcePath),
-      "-show_entries", "stream=index,codec_name,codec_type,channels,channel_layout,width,height,pix_fmt,color_transfer:stream_tags=language,title:stream_disposition=default,forced,attached_pic:format=duration",
+      "-show_entries", "stream=index,codec_name,codec_type,channels,channel_layout,width,height,pix_fmt,color_transfer,level,avg_frame_rate:stream_tags=language,title:stream_disposition=default,forced,attached_pic:format=duration",
       "-of", "json",
       "--", sourcePath,
     ], { timeoutMs: 30_000, maxStdout: MAX_PROBE_OUTPUT });
@@ -185,7 +186,7 @@ export class MediaAdapter {
     return total;
   }
 
-  async inspect({ sourcePath, sourceSize, sourceMtimeMs, audioTrack, signal, onProgress = () => undefined }) {
+  async inspect({ sourcePath, sourceSize, sourceMtimeMs, audioTrack, cast, preferredAudioLanguage, signal, onProgress = () => undefined }) {
     signal?.throwIfAborted();
     if (!this.#ffmpeg || !this.#ffprobe) throw new Error("Le moteur média local n'est pas initialisé.");
     const resolvedSource = await canonicalPathWithoutLinks(sourcePath);
@@ -198,7 +199,7 @@ export class MediaAdapter {
       this.#analyses.set(probeKey, probe);
       while (this.#analyses.size > 128) this.#analyses.delete(this.#analyses.keys().next().value);
     }
-    const analysis = analyzeProbe(await this.#analyses.get(probeKey), { audioTrack });
+    const analysis = analyzeProbe(await this.#analyses.get(probeKey), { audioTrack, cast, preferredAudioLanguage });
     signal?.throwIfAborted();
     return { ...analysis, sourcePath: resolvedSource };
   }
@@ -226,8 +227,8 @@ export class MediaAdapter {
     }, options.onProgress);
   }
 
-  async prepare({ sourcePath, sourceSize, sourceMtimeMs, audioTrack, signal, onProgress = () => undefined }) {
-    const analysis = await this.inspect({ sourcePath, sourceSize, sourceMtimeMs, audioTrack, signal, onProgress });
+  async prepare({ sourcePath, sourceSize, sourceMtimeMs, audioTrack, cast, preferredAudioLanguage, signal, onProgress = () => undefined }) {
+    const analysis = await this.inspect({ sourcePath, sourceSize, sourceMtimeMs, audioTrack, cast, preferredAudioLanguage, signal, onProgress });
     const resolvedSource = analysis.sourcePath;
     if (!analysis.needsAdaptation) return null;
     adaptationBudget(analysis, sourceSize);
@@ -237,6 +238,7 @@ export class MediaAdapter {
       sourceMtimeMs,
       videoIndex: analysis.video.index,
       audioIndex: analysis.audio?.index ?? null,
+      cast: analysis.cast,
     });
     const outputPath = path.join(this.#cacheDirectory, `${key}.mp4`);
     if (!containsPath(this.#cacheDirectory, outputPath)) throw new Error("Chemin de cache média invalide.");
@@ -252,7 +254,7 @@ export class MediaAdapter {
       // Protéger aussi le fichier pendant l'analyse Defender, avant l'émission du jeton.
       this.#protectedUntil.set(result.filePath, Date.now() + 10 * 60_000);
       if (analysis.videoAdapted) {
-        const videoKey = JSON.stringify([resolvedSource, sourceSize, sourceMtimeMs, analysis.video.index]);
+        const videoKey = JSON.stringify([resolvedSource, sourceSize, sourceMtimeMs, analysis.video.index, analysis.cast]);
         this.#videoSources.set(videoKey, result);
         while (this.#videoSources.size > 128) this.#videoSources.delete(this.#videoSources.keys().next().value);
       }
@@ -305,7 +307,7 @@ export class MediaAdapter {
     }
     const outputLimit = Math.floor(Math.min(MAX_CACHE_BYTES - retainedBytes, freeBytes - DISK_RESERVE_BYTES));
     const tempPath = path.join(this.#cacheDirectory, `${randomUUID()}.partial`);
-    const videoKey = JSON.stringify([resolvedSource, sourceSize, sourceMtimeMs, analysis.video.index]);
+    const videoKey = JSON.stringify([resolvedSource, sourceSize, sourceMtimeMs, analysis.video.index, analysis.cast]);
     const previousVideo = analysis.videoAdapted ? this.#videoSources.get(videoKey) : null;
     const previousInfo = previousVideo ? await lstat(previousVideo.filePath).catch(() => null) : null;
     const reuseVideo = previousInfo?.isFile() && !previousInfo.isSymbolicLink()

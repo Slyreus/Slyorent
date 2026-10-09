@@ -1635,8 +1635,8 @@ export class TorrentService {
     if (this.#isSharingProtected(raw) || this.#scanRecords.get(key) !== record || sourceAfter.size !== record.size || sourceAfter.mtimeMs !== record.mtimeMs) throw new Error("La validation du média a changé pendant son ouverture.");
   }
 
-  async #openMedia({ id, fileIndex, purpose = "playback", audioTrack }, ownerWebContentsId, signal, onProgress) {
-    if (!new Set(["playback", "thumbnail"]).has(purpose)) throw new Error("Usage du flux média invalide.");
+  async #openMedia({ id, fileIndex, purpose = "playback", audioTrack, preferredAudioLanguage }, ownerWebContentsId, signal, onProgress) {
+    if (!new Set(["playback", "thumbnail", "cast"]).has(purpose)) throw new Error("Usage du flux média invalide.");
     const context = await this.#validatedMedia({ id, fileIndex }, signal);
     const { raw, file, record, filePath } = context;
     let servedPath = filePath;
@@ -1651,13 +1651,16 @@ export class TorrentService {
     let audioTracks = [];
     let subtitleTracks = [];
     let selectedAudioTrack = null;
-    if (purpose === "playback" && this.#mediaAdapter && ["video/x-matroska", "video/mp4", "video/webm"].includes(mimeType)) {
+    let duration = 0;
+    if (purpose === "cast" && !["video/x-matroska", "video/mp4", "video/webm"].includes(mimeType)) throw new Error("Le cast est disponible pour les vidéos MKV, MP4 et WebM.");
+    if (purpose !== "thumbnail" && this.#mediaAdapter && ["video/x-matroska", "video/mp4", "video/webm"].includes(mimeType)) {
       await this.#audit.append("media.preparation_started", { torrentId: id, fileIndex });
-      const options = { sourcePath: filePath, sourceSize: record.size, sourceMtimeMs: record.mtimeMs, audioTrack, signal, onProgress };
+      const options = { sourcePath: filePath, sourceSize: record.size, sourceMtimeMs: record.mtimeMs, audioTrack, preferredAudioLanguage, cast: purpose === "cast", signal, onProgress };
       const analysis = await this.#mediaAdapter.inspect(options);
       audioTracks = analysis.audioTracks;
       subtitleTracks = analysis.subtitleTracks;
       selectedAudioTrack = analysis.audio?.index ?? null;
+      duration = analysis.duration;
       audioCodec = analysis.audio ? String(analysis.audio.codec_name).toUpperCase() : null;
       audioLanguage = analysis.audio?.tags?.language || null;
       const adapted = await this.#mediaAdapter.prepare(options);
@@ -1701,6 +1704,6 @@ export class TorrentService {
     });
     await this.#audit.append("media.access_issued", { torrentId: id, fileIndex, expiresAt: issued.expiresAt });
     onProgress({ stage: "ready", percent: 100 });
-    return { ...issued, audioAdapted, audioCodec, audioLanguage, videoAdapted, videoCodec, audioTracks, subtitleTracks, selectedAudioTrack };
+    return { ...issued, audioAdapted, audioCodec, audioLanguage, videoAdapted, videoCodec, audioTracks, subtitleTracks, selectedAudioTrack, duration };
   }
 }

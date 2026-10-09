@@ -15,6 +15,10 @@ const bridge: MediaBridge = {
   saveLibraryPreferences: (options) => invoke("saveLibraryPreferences", options) as ReturnType<NonNullable<MediaBridge["saveLibraryPreferences"]>>,
   savePlayback: (options) => invoke("savePlayback", options) as ReturnType<MediaBridge["savePlayback"]>,
   setMediaWatched: (options) => invoke("setMediaWatched", options) as ReturnType<MediaBridge["setMediaWatched"]>,
+  castDiscover: () => invoke("castDiscover") as ReturnType<NonNullable<MediaBridge["castDiscover"]>>,
+  castStatus: () => invoke("castStatus") as ReturnType<NonNullable<MediaBridge["castStatus"]>>,
+  castStart: (options) => invoke("castStart", options) as ReturnType<NonNullable<MediaBridge["castStart"]>>,
+  castControl: (options) => invoke("castControl", options) as ReturnType<NonNullable<MediaBridge["castControl"]>>,
   verifyAndScan: async () => { throw new Error("Hors test"); },
   chooseDownloadDirectory: async () => { throw new Error("Hors test"); },
   openDownloadDirectory: async () => { throw new Error("Hors test"); },
@@ -123,8 +127,19 @@ async function run() {
   await until(() => document.querySelectorAll(".sly-media-row").length === 1, "Filtre des médias terminés incorrect");
   click(".sly-media-mark");
   await until(() => document.querySelectorAll(".sly-media-row").length === 0, "Remise à zéro du visionnage impossible");
+  [...document.querySelectorAll<HTMLButtonElement>(".sly-media-filter-tabs button")].find((item) => item.textContent === "Tout")!.click();
+  await until(() => Boolean(document.querySelector(firstButton)), "Liste absente"); click(firstButton);
+  await until(() => Boolean(document.querySelector("[data-player-cast]:not(:disabled)")), "Bouton Caster indisponible");
+  click("[data-player-cast]");
+  await until(() => Boolean(document.querySelector("#sly-cast-device option[value='tv-test']")), "Découverte des appareils absente");
+  assert(document.querySelector<HTMLInputElement>(".sly-cast-check input")?.checked, "Enchaînement automatique désactivé par défaut");
+  click(".sly-cast-dialog footer .sly-media-primary");
+  await until(() => Boolean(document.querySelector(".sly-cast-panel")) && !currentVideo(), "La lecture locale doit céder la place au cast");
+  assert(document.querySelector(".sly-cast-panel")?.textContent?.includes("TV de test"), "Appareil sélectionné absent");
+  const stop = [...document.querySelectorAll<HTMLButtonElement>(".sly-cast-panel button")].find((item) => item.textContent?.includes("Arrêter le cast"))!; stop.click();
+  await until(() => !document.querySelector(".sly-cast-panel"), "Cast non arrêté");
   root.unmount();
-  await invoke("finish", { ok: true, message: "Sous-titres affichés, choix de langue, changement audio avec conservation de la pause, position, volume et vitesse. Suivi, reprise et préparation suivante." });
+  await invoke("finish", { ok: true, message: "Lecteur local, suivi, langues et sous-titres. Sélection d’appareil, transfert au cast et arrêt." });
 }
 void run().catch(async (error: unknown) => {
   const context = document.querySelector("dialog")?.textContent || "Aucun dialogue";

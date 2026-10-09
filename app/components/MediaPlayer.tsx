@@ -1,6 +1,6 @@
 "use client";
 
-import { Captions, CirclePlay, Clock3, LoaderCircle, LockKeyhole, Maximize2, Minimize2, Music2, RotateCcw, ShieldCheck, SkipBack, SkipForward, X } from "lucide-react";
+import { Captions, Cast, CirclePlay, Clock3, LoaderCircle, LockKeyhole, Maximize2, Minimize2, Music2, RotateCcw, ShieldCheck, SkipBack, SkipForward, X } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type SyntheticEvent } from "react";
 import type { MediaEpisode } from "../../lib/media-library";
 import { canResume, defaultSubtitleTrack, formatMediaTime, trackLabel, trackLanguage, type MediaAccess, type MediaPlaybackSession, type WatchRecord } from "../../lib/media-playback";
@@ -16,9 +16,10 @@ type Props = {
   onSelect: (episode: MediaEpisode) => void;
   onClose: () => void;
   onProgress: (key: string, record: WatchRecord) => void;
+  onCast?: (options: { position: number; audioTrack?: number; subtitleTrack: number | null }) => void;
 };
 
-export function MediaPlayer({ episode, initialRecord, session, getBridge, previous, next, onSelect, onClose, onProgress }: Props) {
+export function MediaPlayer({ episode, initialRecord, session, getBridge, previous, next, onSelect, onClose, onProgress, onCast }: Props) {
   const [source, setSource] = useState<MediaAccess | null>(null);
   const [resumePrompt, setResumePrompt] = useState(canResume(initialRecord));
   const [loading, setLoading] = useState(true);
@@ -379,6 +380,7 @@ export function MediaPlayer({ episode, initialRecord, session, getBridge, previo
         {episode.kind === "video" && <label><Captions size={16} /><span>Sous-titres</span><select aria-label="Sous-titres" value={subtitleIndex ?? ""} disabled={!source.subtitleTracks?.some((track) => track.supported !== false)} onChange={(event) => chooseSubtitle(event.target.value)}><option value="">{source.subtitleTracks?.length ? "Désactivés" : "Aucun sous-titre intégré"}</option>{source.subtitleTracks?.map((track) => <option key={track.index} value={track.index} disabled={track.supported === false}>{trackLabel(track)}</option>)}</select></label>}
         {subtitleIndex !== null && (!subtitle || subtitle.index !== subtitleIndex) && !subtitleError && <span className="sly-media-subtitle-loading" role="status"><LoaderCircle size={14} className="sly-media-spin" /> Chargement…</span>}
       </div>}
+      {onCast && episode.kind === "video" && <button type="button" data-player-cast disabled={!source} onClick={() => { save(); mediaRef.current?.pause(); wantsPlayback.current = false; setPlaying(false); onCast({ position: checkpoint.current.position, audioTrack: audioIndex ?? undefined, subtitleTrack: subtitleIndex }); }}><Cast size={16} /> Caster</button>}
       <span className="sly-media-source-meta"><LockKeyhole size={14} /> Lecture et suivi locaux</span></footer>
       {subtitleError && <div className="sly-media-player-error sly-media-subtitle-error" role="alert"><span>{subtitleError}</span><button type="button" onClick={() => { setSubtitle(null); setSubtitleError(""); setSubtitleAttempt((value) => value + 1); }}>Réessayer</button></div>}
       {saveError && <div className="sly-media-player-error" role="alert">{saveError}</div>}

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, protocol, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, powerSaveBlocker, protocol, shell } from "electron";
 import { randomUUID } from "node:crypto";
 import { realpath, stat } from "node:fs/promises";
 import path from "node:path";
@@ -14,6 +14,7 @@ import { TorrentService } from "./torrent-service.mjs";
 import { TransmissionManager } from "./transmission-manager.mjs";
 import { WatchHistory } from "./watch-history.mjs";
 import { TorrentOpenQueue } from "./torrent-open-queue.mjs";
+import { CastService } from "./cast-service.mjs";
 
 const IPC_CHANNEL = "secutorrent:rpc";
 const PRODUCT_NAME = "Slyorrent";
@@ -93,7 +94,7 @@ function errorEnvelope(id, error) {
   return { jsonrpc: "2.0", id, error: { code: safeCode, message: safeMessage } };
 }
 
-function registerIpc({ mainWindow, renderer, service, manager, audit, sharingHistory, watchHistory, libraryPreferences, mediaVault, openQueue }) {
+function registerIpc({ mainWindow, renderer, service, manager, audit, sharingHistory, watchHistory, libraryPreferences, mediaVault, openQueue, cast }) {
   const allowRequest = createRateLimiter();
   const destinationCapabilities = new Map();
   const pruneDestinationCapabilities = () => {
@@ -202,6 +203,10 @@ function registerIpc({ mainWindow, renderer, service, manager, audit, sharingHis
     ["setSeedPolicy", async (params) => service.setSeedPolicy(params)],
     ["openMedia", async (params, event) => service.openMedia(params, event.sender.id)],
     ["openSubtitle", async (params, event) => service.openSubtitle(params, event.sender.id)],
+    ["castDiscover", async () => cast.discover()],
+    ["castStatus", async (_params, event) => cast.status(event.sender.id)],
+    ["castStart", async (params, event) => cast.start(params, event.sender.id)],
+    ["castControl", async (params, event) => cast.control(params, event.sender.id)],
     ["renewMedia", async ({ url }, event) => mediaVault.renew(url, event.sender.id)],
     ["releaseMedia", async ({ url }, event) => mediaVault.release(url, event.sender.id)],
     ["cancelMediaPreparation", async ({ requestId }, event) => service.cancelMediaPreparation(requestId, event.sender.id)],
@@ -307,12 +312,18 @@ async function bootstrap() {
   const peerTelemetry = await createDefaultPeerTelemetry({ databasePath: path.join(app.getAppPath(), ".runtime", "geoip", "GeoLite2-City.mmdb") });
   const contentRegistry = new ContentRegistry(path.join(app.getPath("userData"), "content-security"));
   const service = new TorrentService({ manager, audit, mediaVault, mediaAdapter, peerTelemetry, contentRegistry });
+  let castSleepBlocker;
+  const cast = new CastService({ service, vault: mediaVault, history: watchHistory, audit, sleep: (active) => {
+    if (active && castSleepBlocker === undefined) castSleepBlocker = powerSaveBlocker.start("prevent-app-suspension");
+    if (!active && castSleepBlocker !== undefined) { powerSaveBlocker.stop(castSleepBlocker); castSleepBlocker = undefined; }
+  } });
   let sharingMaintenanceTimer = null;
   let sharingMaintenanceInFlight = null;
   let validationMaintenanceTimer = null;
   let validationMaintenanceInFlight = null;
 
   const stopSharingMaintenance = async () => {
+    await cast.close();
     await watchHistory.flush();
     await libraryPreferences.flush();
     if (sharingMaintenanceTimer !== null) {
@@ -399,9 +410,9 @@ async function bootstrap() {
   });
   mainWindow.webContents.session.protocol.handle("secutorrent-media", (request) => mediaVault.handle(request));
   lockRendererSession(mainWindow, renderer, mediaVault);
-  registerIpc({ mainWindow, renderer, service, manager, audit, sharingHistory, watchHistory, libraryPreferences, mediaVault, openQueue });
+  registerIpc({ mainWindow, renderer, service, manager, audit, sharingHistory, watchHistory, libraryPreferences, mediaVault, openQueue, cast });
   const mediaOwnerId = mainWindow.webContents.id;
-  mainWindow.on("closed", () => service.cancelMediaOwner(mediaOwnerId));
+  mainWindow.on("closed", () => { service.cancelMediaOwner(mediaOwnerId); void cast.stop(mediaOwnerId); });
 
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   mainWindow.webContents.on("will-navigate", (event, destination) => {

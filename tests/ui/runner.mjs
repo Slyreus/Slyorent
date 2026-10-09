@@ -21,6 +21,7 @@ const calls = [];
 const outstanding = new Set();
 const cancellations = new Set();
 let delay = 0;
+let castState = { active: false };
 const window = new BrowserWindow({ width: 1250, height: 900, show: false, webPreferences: { preload: path.join(path.dirname(fileURLToPath(import.meta.url)), "preload.cjs"), sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, backgroundThrottling: false, offscreen: true, autoplayPolicy: "no-user-gesture-required" } });
 window.webContents.setAudioMuted(true);
 window.webContents.session.protocol.handle("secutorrent-media", (request) => vault.handle(request));
@@ -48,6 +49,14 @@ ipcMain.handle("media-test", async (_event, method, params = {}) => {
       if (![3, 4].includes(params.trackIndex)) throw new Error("Piste de sous-titres introuvable.");
       return { vtt: `WEBVTT\n\n00:00:00.000 --> 00:01:00.000\n${params.trackIndex === 3 ? "Sous-titres français de test" : "English test subtitles"}\n` };
     }
+    case "castDiscover": return { devices: [{ id: "tv-test", kind: "chromecast", name: "TV de test", model: "Test" }], networks: [{ id: "network-test", name: "Réseau de test", address: "192.168.1.10" }] };
+    case "castStatus": return castState;
+    case "castStart": {
+      if (!params.autoNext || !params.queue.length || params.deviceId !== "tv-test") throw new Error("Options de cast incorrectes");
+      castState = { active: true, kind: "chromecast", deviceName: "TV de test", item: params.queue[params.index], index: params.index, total: params.queue.length, position: params.position, duration: 60, playing: true, autoNext: params.autoNext };
+      return castState;
+    }
+    case "castControl": castState = { active: false }; return castState;
     case "renewMedia": return vault.renew(params.url, window.webContents.id);
     case "releaseMedia": outstanding.delete(params.url); return vault.release(params.url, window.webContents.id);
     case "cancelMediaPreparation": cancellations.add(params.requestId); return { ok: true };

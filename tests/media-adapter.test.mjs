@@ -37,6 +37,11 @@ test("convertir HEVC 10 bits et E-AC3 français sur CPU et avec accélération d
       assert.ok(Number(output.format.duration) >= 1.9);
       assert.equal((await adapter.prepare(options)).cacheHit, true);
       if (!hardwareAcceleration) {
+        const cast = await adapter.prepare({ ...options, cast: true });
+        assert.notEqual(cast.filePath, result.filePath, "Le profil Cast doit avoir son propre cache");
+        const castProbe = await execFileAsync(ffprobePath, ["-v", "error", "-show_entries", "stream=codec_name,level,width,height,avg_frame_rate", "-of", "json", cast.filePath], { windowsHide: true, timeout: 15_000 });
+        assert.equal(JSON.parse(castProbe.stdout).streams[0].level, 41);
+        assert.equal((await adapter.prepare({ ...options, cast: true })).cacheHit, true);
         const audioProgress = [];
         const english = await adapter.prepare({ ...options, audioTrack: 1, onProgress: (value) => audioProgress.push(value) });
         assert.equal(english.audioLanguage, "eng"); assert.notEqual(english.filePath, result.filePath);

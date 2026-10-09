@@ -1,7 +1,7 @@
 {
   "name": "slyorrent",
   "productName": "Slyorrent",
-  "version": "1.1.5",
+  "version": "1.1.6",
   "private": true,
   "description": "Client torrent pour Windows avec médiathèque et lecteur intégré.",
   "author": "Slyreus",

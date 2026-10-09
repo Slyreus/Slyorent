@@ -31,7 +31,7 @@ function trackDescription(stream) {
   };
 }
 
-export function analyzeProbe(probe, { audioTrack } = {}) {
+export function analyzeProbe(probe, { audioTrack, cast = false, preferredAudioLanguage } = {}) {
   const streams = Array.isArray(probe?.streams) ? probe.streams : [];
   const video = streams.find((stream) => stream?.codec_type === "video" && Number.isInteger(stream.index) && !stream.disposition?.attached_pic) ?? null;
   const audioStreams = streams.filter((stream) => stream?.codec_type === "audio" && Number.isInteger(stream.index));
@@ -40,7 +40,7 @@ export function analyzeProbe(probe, { audioTrack } = {}) {
     throw Object.assign(new Error("Piste audio introuvable."), { code: "MEDIA_AUDIO_TRACK_INVALID" });
   }
   const audio = audioTrack === undefined
-    ? audioStreams.find((stream) => FRENCH.has(audioLanguage(stream))) ?? defaultAudio
+    ? audioStreams.find((stream) => preferredAudioLanguage && audioLanguage(stream) === preferredAudioLanguage) ?? audioStreams.find((stream) => FRENCH.has(audioLanguage(stream))) ?? defaultAudio
     : audioStreams.find((stream) => stream.index === audioTrack);
   const audioTracks = audioStreams.map((stream) => ({ ...trackDescription(stream), channels: Number(stream.channels) || 0 }));
   const subtitleTracks = streams.filter((stream) => stream?.codec_type === "subtitle" && Number.isInteger(stream.index)).map((stream) => ({
@@ -48,20 +48,22 @@ export function analyzeProbe(probe, { audioTrack } = {}) {
   }));
   const codec = String(video?.codec_name || "").toLowerCase();
   let videoAdapted = Boolean(video && (!NATIVE_VIDEO.has(codec) || (codec === "h264" && /(?:p10|p12|p16|444|422)/u.test(video.pix_fmt || ""))));
+  const [frames, divisor] = String(video?.avg_frame_rate || "0/1").split("/").map(Number);
+  if (cast && video) videoAdapted = codec !== "h264" || videoAdapted || Number(video.width) > 1920 || Number(video.height) > 1080 || Number(video.level) > 41 || frames / divisor > 30;
   const audioNeedsConversion = Boolean(audio && AUDIO_TO_CONVERT.has(String(audio.codec_name || "").toLowerCase()));
   const selectFrench = Boolean(audio && defaultAudio && audio.index !== defaultAudio.index);
   // Une copie avec une seule piste audio permet un choix fiable dans Chromium.
-  const needsAdaptation = Boolean(video && (videoAdapted || audioNeedsConversion || selectFrench || audioStreams.length > 1));
+  const needsAdaptation = Boolean(video && (cast || videoAdapted || audioNeedsConversion || selectFrench || audioStreams.length > 1));
   if (needsAdaptation && !COPY_TO_MP4.has(codec)) videoAdapted = true;
   const seconds = Number(probe?.format?.duration);
-  return { video, audio, audioTracks, subtitleTracks, needsAdaptation, videoAdapted, duration: Number.isFinite(seconds) && seconds > 0 ? seconds : 0 };
+  return { video, audio, audioTracks, subtitleTracks, needsAdaptation, videoAdapted, cast, duration: Number.isFinite(seconds) && seconds > 0 ? seconds : 0 };
 }
 
 export function adaptationBudget(analysis, sourceSize) {
   if (!analysis.duration || analysis.duration > 24 * 60 * 60) throw Object.assign(new Error("Durée du média absente ou hors limite."), { code: "MEDIA_DURATION_INVALID" });
   const width = Number(analysis.video?.width), height = Number(analysis.video?.height);
   if (analysis.videoAdapted && (![width, height].every((value) => Number.isInteger(value) && value > 0 && value <= 7680) || width * height > 7680 * 4320)) throw Object.assign(new Error("Dimensions vidéo hors limite."), { code: "MEDIA_DIMENSIONS_INVALID" });
-  const maxRate = width * height > 1920 * 1080 ? 30_000_000 : 12_000_000;
+  const maxRate = analysis.cast ? 8_000_000 : width * height > 1920 * 1080 ? 30_000_000 : 12_000_000;
   const reservedBytes = Math.ceil(analysis.videoAdapted
     ? analysis.duration * (maxRate + 192_000) / 8 * 1.05 + 8 * 1024 * 1024
     : sourceSize + analysis.duration * 192_000 / 8 + 8 * 1024 * 1024);
@@ -72,14 +74,15 @@ export function conversionVideoArgs(analysis, encoder, threads) {
   if (!analysis.videoAdapted) return ["-c:v", "copy"];
   const { maxRate } = adaptationBudget(analysis, 0);
   const hdr = ["smpte2084", "arib-std-b67"].includes(analysis.video.color_transfer);
-  const filters = hdr
+  let filters = hdr
     ? "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p"
     : "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p";
+  if (analysis.cast) filters += ",scale=w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,fps=30";
   return ["-c:v", encoder, ...(encoder === "h264_nvenc"
     ? ["-preset", "p4", "-rc", "vbr", "-cq", "20", "-b:v", "0"]
     : ["-preset", "veryfast", "-crf", "20", "-threads", String(threads)]),
   "-maxrate", String(maxRate), "-bufsize", String(maxRate * 2), "-vf", filters,
-  "-pix_fmt", "yuv420p", ...(hdr ? ["-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709"] : [])];
+  "-pix_fmt", "yuv420p", ...(analysis.cast ? ["-profile:v", "main", "-level:v", "4.1"] : []), ...(hdr ? ["-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709"] : [])];
 }
 
 export function mediaProgressParser(duration, report) {

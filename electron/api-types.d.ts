@@ -275,6 +275,10 @@ declare global {
       setSeedPolicy(options: { id: number; ratioLimit: number | null; idleMinutes: number | null; uploadLimitKbps: number | null }): Promise<{ ok: true; torrent: SecuTorrentTorrent }>;
       openMedia(options: { id: number; fileIndex: number; purpose?: "playback" | "thumbnail"; requestId?: string; audioTrack?: number }): Promise<import("../lib/media-playback").MediaAccess & { name: string }>;
       openSubtitle(options: { id: number; fileIndex: number; trackIndex: number; requestId: string }): Promise<{ vtt: string }>;
+      castDiscover(): Promise<import("../lib/media-cast").CastDiscovery>;
+      castStatus(): Promise<import("../lib/media-cast").CastStatus>;
+      castStart(options: import("../lib/media-cast").CastStart): Promise<import("../lib/media-cast").CastStatus>;
+      castControl(options: import("../lib/media-cast").CastControl): Promise<import("../lib/media-cast").CastStatus>;
       renewMedia(url: string): Promise<{ expiresAt: string }>;
       releaseMedia(url: string): Promise<{ ok: true }>;
       cancelMediaPreparation(requestId: string): Promise<{ ok: true }>;
