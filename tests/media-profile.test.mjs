@@ -1,6 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { adaptationBudget, analyzeProbe, conversionVideoArgs, localMediaInputArgs, mediaProgressParser } from "../electron/media-profile.mjs";
+import { cleanWebVtt } from "../electron/subtitles.mjs";
+
+test("choisir une piste audio existante et isoler les dialogues des sous-titres", () => {
+  const value = probe("h264", "aac"); value.streams[1].pix_fmt = "yuv420p";
+  value.streams.push({ index: 4, codec_type: "subtitle", codec_name: "ass", tags: { language: "fre", title: "Français" }, disposition: { default: 1 } });
+  const result = analyzeProbe(value, { audioTrack: 2 });
+  assert.equal(result.audio.index, 2); assert.equal(result.needsAdaptation, true); assert.equal(result.videoAdapted, false);
+  assert.equal(result.audioTracks.length, 2); assert.equal(result.subtitleTracks[0].supported, true);
+  for (const index of [4, -1, "2", 2.5]) assert.throws(() => analyzeProbe(value, { audioTrack: index }), /Piste audio/);
+  const remoteUrl = ["https:", "//invalid.test"].join("");
+  const vtt = cleanWebVtt(`WEBVTT\n\nSTYLE\n::cue { background: url(${remoteUrl}); }\n\n00:00:01.000 --> 00:00:03.000 line:20%\n<i>Bonjour</i><img src=remote><script>Texte</script>\n`);
+  assert.equal(vtt, "WEBVTT\n\n00:00:01.000 --> 00:00:03.000\n<i>Bonjour</i>Texte\n");
+  assert.throws(() => cleanWebVtt("<html>"), /invalide/);
+});
 
 const probe = (codec = "hevc", audio = "eac3") => ({ format: { duration: "120" }, streams: [
   { index: 0, codec_type: "video", codec_name: "png", disposition: { attached_pic: 1 } },

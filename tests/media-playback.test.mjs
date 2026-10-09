@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { canResume, formatMediaTime, isLocalMediaUrl, MediaPlaybackSession, watchPercentage } from "../lib/media-playback.ts";
+import { canResume, defaultSubtitleTrack, formatMediaTime, isLocalMediaUrl, MediaPlaybackSession, trackLabel, watchPercentage } from "../lib/media-playback.ts";
 
 const episode = (index = 0) => ({ key: `1:${index}`, torrentId: 1, fileIndex: index, playable: true });
 const access = (letter = "a") => ({ url: `secutorrent-media://stream/${letter.repeat(43)}`, mimeType: "video/mp4", expiresAt: "" });
@@ -8,6 +8,26 @@ const deferred = () => { let resolve; const promise = new Promise((done) => { re
 function bridge() {
   return { calls: [], released: [], cancelled: [], openMedia(options) { this.calls.push(options); return Promise.resolve(access(String.fromCharCode(97 + options.fileIndex))); }, renewMedia: async () => ({ expiresAt: "" }), releaseMedia(url) { this.released.push(url); return Promise.resolve({ ok: true }); }, cancelMediaPreparation(requestId) { this.cancelled.push(requestId); return Promise.resolve({ ok: true }); } };
 }
+
+test("préférer les sous-titres français pour une VO et conserver le choix audio lors d'une récupération", async () => {
+  const tracks = [{ index: 3, language: "fre", title: "", codec: "ass", default: true, forced: false, supported: true }];
+  assert.equal(defaultSubtitleTrack(tracks, "jpn"), 3);
+  assert.equal(defaultSubtitleTrack(tracks, "fre"), null);
+  assert.equal(defaultSubtitleTrack([{ ...tracks[0], forced: true }], "fre"), 3);
+  assert.equal(defaultSubtitleTrack([{ ...tracks[0], supported: false }], "jpn"), null);
+  assert.equal(trackLabel(tracks[0]), "Français");
+  const api = bridge(), waiting = deferred();
+  api.openSubtitle = () => waiting.promise;
+  const session = new MediaPlaybackSession(api);
+  await session.reopen(episode(), 2);
+  assert.equal(api.calls[0].audioTrack, 2);
+  const loading = session.subtitle(episode(), 3);
+  session.cancelSubtitles(episode().key);
+  waiting.resolve({ vtt: "WEBVTT\n\n" });
+  await assert.rejects(loading, /fermé/);
+  assert.equal(api.cancelled.length, 1);
+  session.dispose();
+});
 
 test("distinguer progression, reprise et fin réelle", () => {
   const record = { position: 99.99, duration: 100, completed: false, updatedAt: 1 };

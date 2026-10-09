@@ -4,6 +4,7 @@ const FRENCH = new Set(["fr", "fre", "fra", "french"]);
 const AUDIO_TO_CONVERT = new Set(["ac3", "eac3", "dca", "dts", "truehd", "mlp"]);
 const NATIVE_VIDEO = new Set(["h264", "av1", "vp8", "vp9"]);
 const COPY_TO_MP4 = new Set(["h264", "av1"]);
+const TEXT_SUBTITLES = new Set(["ass", "ssa", "subrip", "webvtt", "mov_text", "text"]);
 const INPUT_FORMATS = new Map([
   [".mkv", "matroska,webm"], [".webm", "matroska,webm"],
   [".mp4", "mov"], [".m4v", "mov"], [".m4a", "mov"],
@@ -19,20 +20,41 @@ export function localMediaInputArgs(sourcePath) {
   return ["-protocol_whitelist", "file", "-format_whitelist", format];
 }
 
-export function analyzeProbe(probe) {
+function trackDescription(stream) {
+  return {
+    index: stream.index,
+    language: audioLanguage(stream).replace(/[^a-z0-9-]/gu, "").slice(0, 35) || "und",
+    title: String(stream.tags?.title || "").replace(/[\u0000-\u001f\u007f]/gu, " ").trim().slice(0, 120),
+    codec: String(stream.codec_name || "unknown").toLowerCase().slice(0, 40),
+    default: Boolean(stream.disposition?.default),
+    forced: Boolean(stream.disposition?.forced),
+  };
+}
+
+export function analyzeProbe(probe, { audioTrack } = {}) {
   const streams = Array.isArray(probe?.streams) ? probe.streams : [];
   const video = streams.find((stream) => stream?.codec_type === "video" && Number.isInteger(stream.index) && !stream.disposition?.attached_pic) ?? null;
   const audioStreams = streams.filter((stream) => stream?.codec_type === "audio" && Number.isInteger(stream.index));
   const defaultAudio = audioStreams.find((stream) => stream.disposition?.default) ?? audioStreams[0] ?? null;
-  const audio = audioStreams.find((stream) => FRENCH.has(audioLanguage(stream))) ?? defaultAudio;
+  if (audioTrack !== undefined && (!Number.isInteger(audioTrack) || !audioStreams.some((stream) => stream.index === audioTrack))) {
+    throw Object.assign(new Error("Piste audio introuvable."), { code: "MEDIA_AUDIO_TRACK_INVALID" });
+  }
+  const audio = audioTrack === undefined
+    ? audioStreams.find((stream) => FRENCH.has(audioLanguage(stream))) ?? defaultAudio
+    : audioStreams.find((stream) => stream.index === audioTrack);
+  const audioTracks = audioStreams.map((stream) => ({ ...trackDescription(stream), channels: Number(stream.channels) || 0 }));
+  const subtitleTracks = streams.filter((stream) => stream?.codec_type === "subtitle" && Number.isInteger(stream.index)).map((stream) => ({
+    ...trackDescription(stream), supported: TEXT_SUBTITLES.has(String(stream.codec_name || "").toLowerCase()),
+  }));
   const codec = String(video?.codec_name || "").toLowerCase();
   let videoAdapted = Boolean(video && (!NATIVE_VIDEO.has(codec) || (codec === "h264" && /(?:p10|p12|p16|444|422)/u.test(video.pix_fmt || ""))));
   const audioNeedsConversion = Boolean(audio && AUDIO_TO_CONVERT.has(String(audio.codec_name || "").toLowerCase()));
   const selectFrench = Boolean(audio && defaultAudio && audio.index !== defaultAudio.index);
-  const needsAdaptation = Boolean(video && (videoAdapted || audioNeedsConversion || selectFrench));
+  // Une copie avec une seule piste audio permet un choix fiable dans Chromium.
+  const needsAdaptation = Boolean(video && (videoAdapted || audioNeedsConversion || selectFrench || audioStreams.length > 1));
   if (needsAdaptation && !COPY_TO_MP4.has(codec)) videoAdapted = true;
   const seconds = Number(probe?.format?.duration);
-  return { video, audio, needsAdaptation, videoAdapted, duration: Number.isFinite(seconds) && seconds > 0 ? seconds : 0 };
+  return { video, audio, audioTracks, subtitleTracks, needsAdaptation, videoAdapted, duration: Number.isFinite(seconds) && seconds > 0 ? seconds : 0 };
 }
 
 export function adaptationBudget(analysis, sourceSize) {

@@ -45,6 +45,7 @@ const api = Object.freeze({
   remove: (options) => invoke("remove", options),
   setSeedPolicy: (options) => invoke("setSeedPolicy", options),
   openMedia: (options) => invoke("openMedia", options),
+  openSubtitle: (options) => invoke("openSubtitle", options),
   renewMedia: (url) => invoke("renewMedia", { url }),
   releaseMedia: (url) => invoke("releaseMedia", { url }),
   cancelMediaPreparation: (requestId) => invoke("cancelMediaPreparation", { requestId }),

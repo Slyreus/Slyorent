@@ -1571,7 +1571,7 @@ export class TorrentService {
     return job && !job.controller.signal.aborted ? { ...job.progress } : null;
   }
 
-  async openMedia({ requestId = randomUUID(), ...options }, ownerWebContentsId) {
+  async #prepareMediaRequest({ requestId = randomUUID(), ...options }, ownerWebContentsId, action) {
     const key = this.#mediaRequestKey(requestId, ownerWebContentsId);
     if (this.#mediaPreparations.has(key)) throw new Error("Requête média déjà en cours.");
     if (this.#mediaPreparations.size >= 12) throw Object.assign(new Error("Trop de médias en préparation. Fermez un lecteur puis réessayez."), { code: "MEDIA_PREPARATION_BUSY" });
@@ -1581,18 +1581,37 @@ export class TorrentService {
     this.#mediaPreparations.set(key, job);
     const onProgress = (progress) => {
       if (controller.signal.aborted) return;
-      if (!["probe", "queued", "video", "audio", "finalizing", "scan", "ready"].includes(progress.stage)) return;
+      if (!["probe", "queued", "video", "audio", "subtitles", "finalizing", "scan", "ready"].includes(progress.stage)) return;
       job.progress = { stage: progress.stage, percent: Number.isFinite(progress.percent) ? Math.max(0, Math.min(100, Math.floor(progress.percent))) : null, hardware: progress.hardware === true };
     };
-    try { return await this.#openMedia(options, ownerWebContentsId, controller.signal, onProgress); }
+    try { controller.signal.throwIfAborted(); return await action(options, controller.signal, onProgress); }
     finally { this.#mediaPreparations.delete(key); }
   }
 
-  async #openMedia({ id, fileIndex, purpose = "playback" }, ownerWebContentsId, signal, onProgress) {
+  openMedia(options, ownerWebContentsId) {
+    return this.#prepareMediaRequest(options, ownerWebContentsId, (params, signal, onProgress) => this.#openMedia(params, ownerWebContentsId, signal, onProgress));
+  }
+
+  openSubtitle(options, ownerWebContentsId) {
+    return this.#prepareMediaRequest(options, ownerWebContentsId, async ({ id, fileIndex, trackIndex }, signal, onProgress) => {
+      if (!this.#mediaAdapter) throw new Error("Le moteur de sous-titres est indisponible.");
+      const context = await this.#validatedMedia({ id, fileIndex }, signal);
+      const mimeType = await validateMediaSignature(context.filePath);
+      if (!["video/x-matroska", "video/mp4", "video/webm"].includes(mimeType)) throw new Error("Ce média ne contient pas de sous-titres intégrés lisibles.");
+      const vtt = await this.#mediaAdapter.extractSubtitle({
+        sourcePath: context.filePath, sourceSize: context.record.size, sourceMtimeMs: context.record.mtimeMs,
+        trackIndex, signal, onProgress,
+      });
+      await this.#checkMediaValidation(context, signal);
+      await this.#audit.append("media.subtitle_loaded", { torrentId: id, fileIndex, trackIndex });
+      return { vtt };
+    });
+  }
+
+  async #validatedMedia({ id, fileIndex }, signal) {
     signal.throwIfAborted();
     const raw = await this.#rawTorrent(assertTorrentId(id));
     if (this.#isSharingProtected(raw)) throw new Error("Le média est bloqué pendant le contrôle de sécurité.");
-    if (!new Set(["playback", "thumbnail"]).has(purpose)) throw new Error("Usage du flux média invalide.");
     if (!Number.isInteger(fileIndex) || fileIndex < 0 || fileIndex >= (raw.files?.length || 0)) throw new Error("Index de fichier invalide.");
     const file = raw.files[fileIndex];
     if (raw.file_stats?.[fileIndex]?.wanted === false || Number(file.bytes_completed) !== Number(file.length)) throw new Error("Le média n'est pas entièrement disponible.");
@@ -1607,6 +1626,19 @@ export class TorrentService {
       this.#mediaVault.revokeTorrent(raw.hash_string);
       throw new Error("Le média a changé depuis son analyse et doit être rescanné.");
     }
+    return { raw, file, key, record, filePath };
+  }
+
+  async #checkMediaValidation({ raw, key, record, filePath }, signal) {
+    const sourceAfter = await stat(filePath);
+    signal.throwIfAborted();
+    if (this.#isSharingProtected(raw) || this.#scanRecords.get(key) !== record || sourceAfter.size !== record.size || sourceAfter.mtimeMs !== record.mtimeMs) throw new Error("La validation du média a changé pendant son ouverture.");
+  }
+
+  async #openMedia({ id, fileIndex, purpose = "playback", audioTrack }, ownerWebContentsId, signal, onProgress) {
+    if (!new Set(["playback", "thumbnail"]).has(purpose)) throw new Error("Usage du flux média invalide.");
+    const context = await this.#validatedMedia({ id, fileIndex }, signal);
+    const { raw, file, record, filePath } = context;
     let servedPath = filePath;
     let servedSize = record.size;
     let servedMtimeMs = record.mtimeMs;
@@ -1616,9 +1648,19 @@ export class TorrentService {
     let audioLanguage = null;
     let videoAdapted = false;
     let videoCodec = null;
+    let audioTracks = [];
+    let subtitleTracks = [];
+    let selectedAudioTrack = null;
     if (purpose === "playback" && this.#mediaAdapter && ["video/x-matroska", "video/mp4", "video/webm"].includes(mimeType)) {
       await this.#audit.append("media.preparation_started", { torrentId: id, fileIndex });
-      const adapted = await this.#mediaAdapter.prepare({ sourcePath: filePath, sourceSize: record.size, sourceMtimeMs: record.mtimeMs, signal, onProgress });
+      const options = { sourcePath: filePath, sourceSize: record.size, sourceMtimeMs: record.mtimeMs, audioTrack, signal, onProgress };
+      const analysis = await this.#mediaAdapter.inspect(options);
+      audioTracks = analysis.audioTracks;
+      subtitleTracks = analysis.subtitleTracks;
+      selectedAudioTrack = analysis.audio?.index ?? null;
+      audioCodec = analysis.audio ? String(analysis.audio.codec_name).toUpperCase() : null;
+      audioLanguage = analysis.audio?.tags?.language || null;
+      const adapted = await this.#mediaAdapter.prepare(options);
       signal.throwIfAborted();
       if (adapted) {
         onProgress({ stage: "scan", percent: null });
@@ -1647,9 +1689,7 @@ export class TorrentService {
         await this.#audit.append("media.preparation_ready", { torrentId: id, fileIndex, cacheHit: adapted.cacheHit, audioCodec, audioLanguage, videoAdapted, videoCodec });
       }
     }
-    const sourceAfter = await stat(filePath);
-    signal.throwIfAborted();
-    if (this.#isSharingProtected(raw) || this.#scanRecords.get(key) !== record || sourceAfter.size !== record.size || sourceAfter.mtimeMs !== record.mtimeMs) throw new Error("La validation du média a changé pendant son ouverture.");
+    await this.#checkMediaValidation(context, signal);
     const issued = this.#mediaVault.issue({
       filePath: servedPath,
       torrentKey: raw.hash_string,
@@ -1661,6 +1701,6 @@ export class TorrentService {
     });
     await this.#audit.append("media.access_issued", { torrentId: id, fileIndex, expiresAt: issued.expiresAt });
     onProgress({ stage: "ready", percent: 100 });
-    return { ...issued, audioAdapted, audioCodec, audioLanguage, videoAdapted, videoCodec };
+    return { ...issued, audioAdapted, audioCodec, audioLanguage, videoAdapted, videoCodec, audioTracks, subtitleTracks, selectedAudioTrack };
   }
 }

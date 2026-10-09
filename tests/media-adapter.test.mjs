@@ -36,8 +36,43 @@ test("convertir HEVC 10 bits et E-AC3 français sur CPU et avec accélération d
       assert.equal(output.streams[1].codec_name, "aac"); assert.equal(output.streams[1].tags.language, "fre");
       assert.ok(Number(output.format.duration) >= 1.9);
       assert.equal((await adapter.prepare(options)).cacheHit, true);
+      if (!hardwareAcceleration) {
+        const audioProgress = [];
+        const english = await adapter.prepare({ ...options, audioTrack: 1, onProgress: (value) => audioProgress.push(value) });
+        assert.equal(english.audioLanguage, "eng"); assert.notEqual(english.filePath, result.filePath);
+        assert.ok(audioProgress.some((item) => item.stage === "audio"));
+        assert.ok(!audioProgress.some((item) => item.stage === "video"), "La vidéo déjà convertie doit être réutilisée");
+        const output = await execFileAsync(ffprobePath, ["-v", "error", "-show_entries", "stream=codec_name:stream_tags=language", "-of", "json", english.filePath], { windowsHide: true, timeout: 15_000 });
+        assert.equal(JSON.parse(output.stdout).streams[1].tags.language, "eng");
+      }
       assert.equal((await readdir(cacheDirectory)).some((name) => name.endsWith(".partial")), false);
     }
+    assert.deepEqual(await readFile(sourcePath), original);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("lire les sous-titres ASS intégrés et sélectionner une piste AAC", { timeout: 60_000 }, async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "slyorrent-tracks-"));
+  try {
+    const subtitles = path.join(root, "dialogues.srt"), sourcePath = path.join(root, "sample.mkv");
+    await writeFile(subtitles, "1\n00:00:00,000 --> 00:00:02,000\nSous-titres français de test\n", "utf8");
+    await execFileAsync(ffmpegPath, ["-nostdin", "-hide_banner", "-loglevel", "error",
+      "-f", "lavfi", "-i", "testsrc2=s=320x180:d=2", "-f", "lavfi", "-i", "sine=duration=2", "-i", subtitles,
+      "-map", "0:v", "-map", "1:a", "-map", "1:a", "-map", "2:s", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-c:s", "ass",
+      "-metadata:s:a:0", "language=jpn", "-metadata:s:a:1", "language=fre", "-metadata:s:s:0", "language=fre", sourcePath,
+    ], { windowsHide: true, timeout: 20_000 });
+    const source = await stat(sourcePath), original = await readFile(sourcePath);
+    const adapter = await new MediaAdapter({ cacheDirectory: path.join(root, "cache") }).initialize();
+    const options = { sourcePath, sourceSize: source.size, sourceMtimeMs: source.mtimeMs };
+    const analysis = await adapter.inspect(options);
+    assert.equal(analysis.audioTracks.length, 2); assert.equal(analysis.subtitleTracks[0].codec, "ass");
+    const vtt = await adapter.extractSubtitle({ ...options, trackIndex: 3 });
+    assert.match(vtt, /WEBVTT\n\n/); assert.match(vtt, /00:00\.\d{3} --> 00:02\.\d{3}/); assert.match(vtt, /Sous-titres français de test/);
+    assert.equal(await adapter.extractSubtitle({ ...options, trackIndex: 3 }), vtt);
+    const japanese = await adapter.prepare({ ...options, audioTrack: 1 });
+    assert.equal(japanese.audioLanguage, "jpn"); assert.equal(japanese.videoAdapted, false);
+    await assert.rejects(adapter.extractSubtitle({ ...options, trackIndex: 1 }), /sous-titres introuvable/);
+    await assert.rejects(adapter.prepare({ ...options, audioTrack: 3 }), /Piste audio introuvable/);
     assert.deepEqual(await readFile(sourcePath), original);
   } finally { await rm(root, { recursive: true, force: true }); }
 });

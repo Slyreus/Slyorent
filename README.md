@@ -24,6 +24,7 @@ L’installateur est prévu pour Windows 10 et 11 en 64 bits. Microsoft Defender
 - médiathèque par titres ou en liste, saisons réunies, favoris, tris et filtres combinables ;
 - lecture directe, suivi de visionnage et reprise ;
 - lecteur plein écran avec conversion locale HEVC 10 bits et audio AC3, E-AC3, DTS et TrueHD ;
+- choix des pistes audio et des sous-titres intégrés, avec activation du français pour la VO ;
 - partage global, limites individuelles, ratio et volume réellement envoyé ;
 - diagnostic du port, des trackers, des pairs et des demandes de blocs ;
 - carte P2P locale avec positions approximatives et adresses anonymisées avant affichage ;
@@ -42,7 +43,7 @@ npm run check
 npm run release:win
 ```
 
-L’installateur sort dans `release/Slyorrent-Setup-1.1.4.exe`. Le build utilise une liste blanche de fichiers : les torrents, journaux, profils, clés, contenus téléchargés, caches et chemins personnels ne sont pas intégrés.
+L’installateur sort dans `release/Slyorrent-Setup-1.1.5.exe`. Le build utilise une liste blanche de fichiers : les torrents, journaux, profils, clés, contenus téléchargés, caches et chemins personnels ne sont pas intégrés.
 
 Le logo source est dans `public/slyorrent-logo.svg` : un hibou blanc sans bec, sur un carré bleu arrondi. `npm run icons:build` produit le PNG transparent et l’icône Windows en sept tailles, de 16 à 256 pixels. Le rendu se fait localement avec Electron, sans service externe. Les tests vérifient la transparence des coins et la lecture réelle de l’icône par Windows.
 
@@ -60,7 +61,11 @@ Ce classement utilise les noms locaux, pas un catalogue en ligne. Aucun fichier 
 
 Le lecteur prépare l’épisode suivant en arrière-plan. Une vidéo HEVC ou un son incompatible est converti en copie H.264/AAC, avec la piste française si elle existe. La progression apparaît pendant la préparation. L’original ne change pas. NVIDIA est utilisé si un test local confirme sa disponibilité ; sinon la conversion passe sur le processeur. Les sources HDR sont adaptées en SDR pour ce lecteur.
 
-La première ouverture peut prendre plusieurs minutes. Les suivantes réutilisent la copie locale, tant qu’elle est en cache. Une seule conversion tourne à la fois, avec un cache limité à 12 Go et un contrôle de l’espace libre. Fermer le lecteur annule les préparations qui ne servent plus. Les fichiers convertis passent aussi par Defender avant lecture. Les sous-titres et pistes alternatives ne sont pas inclus dans cette copie de lecture ; ils restent dans l’original.
+La première ouverture peut prendre plusieurs minutes. Les suivantes réutilisent la copie locale, tant qu’elle est en cache. Une seule conversion tourne à la fois, avec un cache limité à 12 Go et un contrôle de l’espace libre. Fermer le lecteur annule les préparations qui ne servent plus. Les fichiers convertis passent aussi par Defender avant lecture.
+
+Dans le lecteur, les menus Audio et Sous-titres donnent accès aux pistes du fichier d’origine. Le changement d’audio garde la position, la pause, le volume et la vitesse. Une vidéo HEVC déjà préparée est réutilisée pour éviter de la réencoder à chaque changement de son. Les sous-titres français complets sont activés pour une VO ; avec du son français, seuls les sous-titres français forcés le sont par défaut. Le choix manuel reste disponible.
+
+Les sous-titres texte intégrés ASS, SSA, SRT, WebVTT et mov_text sont convertis localement pour le lecteur. Le minutage et les dialogues sont conservés, avec un texte normal sur fond arrondi, sans les polices ni la mise en page ASS. Audio, sous-titres et navigation entre épisodes partagent la même barre. Les pistes sous forme d’images, comme PGS ou VobSub, sont signalées comme non prises en charge. Les fichiers de sous-titres séparés ne sont pas encore importés. Aucun sous-titre n’est recherché ou téléchargé en ligne.
 
 `npm run test:media-ui` teste le lecteur Electron avec une vidéo synthétique, dans un profil temporaire séparé. Il ne lance pas le moteur torrent et ne lit pas la bibliothèque personnelle.
 

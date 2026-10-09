@@ -12,7 +12,7 @@ import "./media-library.css";
 import "./library-catalog.css";
 
 type Bridge = NonNullable<Window["secuTorrent"]>;
-export type MediaBridge = Pick<Bridge, "openMedia" | "renewMedia" | "releaseMedia" | "cancelMediaPreparation" | "mediaPreparation" | "watchHistory" | "savePlayback" | "setMediaWatched" | "verifyAndScan" | "chooseDownloadDirectory" | "openDownloadDirectory" | "openTorrentDirectory"> & Partial<Pick<Bridge, "libraryPreferences" | "saveLibraryPreferences">>;
+export type MediaBridge = Pick<Bridge, "openMedia" | "renewMedia" | "releaseMedia" | "cancelMediaPreparation" | "mediaPreparation" | "watchHistory" | "savePlayback" | "setMediaWatched" | "verifyAndScan" | "chooseDownloadDirectory" | "openDownloadDirectory" | "openTorrentDirectory"> & Partial<Pick<Bridge, "openSubtitle" | "libraryPreferences" | "saveLibraryPreferences">>;
 export type MediaLibraryProps = {
   torrents: readonly SecuTorrentTorrent[]; bridge?: MediaBridge; initialQuery?: string; onQueryChange?: (value: string) => void;
   downloadDirectory?: string; onDirectoryChanged?: () => void;

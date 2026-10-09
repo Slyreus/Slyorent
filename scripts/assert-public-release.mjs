@@ -50,11 +50,11 @@ if (await regularFile(asarPath, "app.asar")) {
     if (forbiddenRoots.some((prefix) => entry === prefix.slice(0, -1) || entry.startsWith(prefix))) errors.push(`entrée interdite dans app.asar : ${entry}`);
     if (/\.(?:env|key|log|mmdb|msi|part|pem|pfx|resume|torrent)$/iu.test(entry)) errors.push(`fichier sensible dans app.asar : ${entry}`);
   }
-  for (const required of ["dist/index.html", "electron/main.mjs", "electron/preload.cjs", "electron/library-preferences.mjs", "electron/library-preferences-schema.mjs", "public/slyorus.png", "public/slyorrent-logo.png"]) {
+  for (const required of ["dist/index.html", "electron/main.mjs", "electron/preload.cjs", "electron/library-preferences.mjs", "electron/library-preferences-schema.mjs", "electron/media-adapter.mjs", "electron/media-profile.mjs", "electron/subtitles.mjs", "public/slyorus.png", "public/slyorrent-logo.png"]) {
     if (!entries.includes(required)) errors.push(`entrée requise absente de app.asar : ${required}`);
   }
-  for (const module of ["electron/library-preferences.mjs", "electron/library-preferences-schema.mjs"]) {
-    if (entries.includes(module) && !extractFile(asarPath, module).equals(await readFile(path.join(root, module)))) errors.push(`module de médiathèque périmé : ${module}`);
+  for (const module of ["electron/library-preferences.mjs", "electron/library-preferences-schema.mjs", "electron/media-adapter.mjs", "electron/media-profile.mjs", "electron/subtitles.mjs"]) {
+    if (entries.includes(module) && !extractFile(asarPath, path.join(...module.split("/"))).equals(await readFile(path.join(root, module)))) errors.push(`module de médiathèque périmé : ${module}`);
   }
   const packageDocument = JSON.parse(extractFile(asarPath, "package.json").toString("utf8"));
   if (packageDocument.version !== expectedPackage.version || packageDocument.productName !== "Slyorrent") errors.push("métadonnées de version invalides dans app.asar");

@@ -5,6 +5,7 @@ declare global { interface Window { mediaTest: { invoke: (method: string, params
 const invoke = window.mediaTest.invoke;
 const bridge: MediaBridge = {
   openMedia: (options) => invoke("openMedia", options) as ReturnType<MediaBridge["openMedia"]>,
+  openSubtitle: (options) => invoke("openSubtitle", options) as ReturnType<NonNullable<MediaBridge["openSubtitle"]>>,
   renewMedia: (url) => invoke("renewMedia", { url }) as ReturnType<MediaBridge["renewMedia"]>,
   releaseMedia: (url) => invoke("releaseMedia", { url }) as ReturnType<MediaBridge["releaseMedia"]>,
   cancelMediaPreparation: (requestId) => invoke("cancelMediaPreparation", { requestId }) as ReturnType<MediaBridge["cancelMediaPreparation"]>,
@@ -35,6 +36,12 @@ const closeButton = "[aria-label='Fermer le lecteur']";
 const nextButton = "[aria-label='Épisode suivant']";
 const records = () => bridge.watchHistory();
 const recordKey = (index: number) => `${"b".repeat(40)}:${index}`;
+function chooseTrack(label: string, value: string) {
+  const select = document.querySelector<HTMLSelectElement>(`[aria-label='${label}']`);
+  assert(select && !select.disabled, `Sélecteur indisponible : ${label}`);
+  select.value = value; select.dispatchEvent(new Event("change", { bubbles: true }));
+}
+const subtitleText = () => (currentVideo()?.textTracks[0]?.activeCues?.[0] as VTTCue | undefined)?.text;
 
 async function run() {
   render();
@@ -47,8 +54,26 @@ async function run() {
   await until(() => (currentVideo()?.currentTime || 0) > .2, "Démarrage vidéo impossible");
   let video = currentVideo()!;
   assert(!video.muted, "Audio coupé par défaut");
+  await until(() => subtitleText()?.includes("français") === true, "Les sous-titres français ne s'affichent pas automatiquement");
+  await until(() => document.querySelector(".sly-media-caption-line")?.textContent?.includes("français") === true, "Sous-titres absents de l'affichage arrondi");
+  assert(currentVideo()?.textTracks[0]?.mode === "hidden", "Le rendu natif ne doit pas doubler les sous-titres");
+  assert(Boolean(document.querySelector("footer .sly-media-track-controls")), "Les réglages doivent partager la barre des épisodes");
+  video.textTracks[0].mode = "disabled";
+  await until(() => document.querySelector<HTMLSelectElement>("[aria-label='Sous-titres']")?.value === "", "Désactivation native des sous-titres non suivie");
+  chooseTrack("Sous-titres", "4");
+  await until(() => subtitleText()?.includes("English") === true, "Changement de sous-titres impossible");
+  chooseTrack("Sous-titres", "3");
+  await until(() => subtitleText()?.includes("français") === true, "Retour aux sous-titres français impossible");
   video.pause(); video.currentTime = 18;
   await until(async () => ((await records())[recordKey(0)]?.position || 0) >= 18, "Position de pause non sauvegardée");
+  video.volume = .36; video.playbackRate = 1.25;
+  const audioUrl = video.src;
+  chooseTrack("Piste audio", "2");
+  await until(() => Boolean(currentVideo() && currentVideo()!.src !== audioUrl && currentVideo()!.readyState >= 2), "Changement audio bloqué");
+  video = currentVideo()!;
+  assert(video.paused && Math.abs(video.currentTime - 18) < .5, "Position ou pause perdue lors du changement audio");
+  assert(Math.abs(video.volume - .36) < .01 && video.playbackRate === 1.25, "Volume ou vitesse perdus lors du changement audio");
+  assert(document.querySelector<HTMLSelectElement>("[aria-label='Sous-titres']")?.value === "3", "Choix explicite des sous-titres perdu après changement audio");
   click(closeButton);
   await until(() => !document.querySelector("dialog"), "Lecteur non fermé");
   const oldLibrary = document.querySelector("[data-testid='media-library']");
@@ -99,7 +124,7 @@ async function run() {
   click(".sly-media-mark");
   await until(() => document.querySelectorAll(".sly-media-row").length === 0, "Remise à zéro du visionnage impossible");
   root.unmount();
-  await invoke("finish", { ok: true, message: "Accès direct, vignettes libérées, suivi persistant, reprise, expiration, volume, préparation suivante, fin de lecture et annulation." });
+  await invoke("finish", { ok: true, message: "Sous-titres affichés, choix de langue, changement audio avec conservation de la pause, position, volume et vitesse. Suivi, reprise et préparation suivante." });
 }
 void run().catch(async (error: unknown) => {
   const context = document.querySelector("dialog")?.textContent || "Aucun dialogue";

@@ -15,6 +15,7 @@ test("annuler une ouverture média avant son démarrage sans contacter le moteur
   const requestId = "11111111-1111-4111-8111-111111111111";
   service.cancelMediaPreparation(requestId, 42);
   await assert.rejects(service.openMedia({ id: 1, fileIndex: 0, requestId }, 42), { name: "AbortError" });
+  await assert.rejects(service.openSubtitle({ id: 1, fileIndex: 0, trackIndex: 2, requestId }, 42), { name: "AbortError" });
   assert.equal(calls.length, 0);
   assert.throws(() => service.cancelMediaPreparation("not-a-request", 42), /invalide/);
 });
@@ -285,7 +286,7 @@ test("refuser une ouverture préparée pendant une nouvelle analyse de sécurit�
     torrents: [rawTorrent({ percent_done: 1, files: [{ name: "video.mp4", length: contents.length, bytes_completed: contents.length }], file_stats: [{ wanted: true }] })],
     scanFile: cleanFileScan,
     defenderHealthCheck: async () => { if (++healthCalls > 1) await blockedHealth; return healthyDefender(); },
-    mediaAdapter: { prepare: async () => { prepared(); await preparing; return null; } },
+    mediaAdapter: { inspect: async () => ({ audioTracks: [], subtitleTracks: [], audio: null }), prepare: async () => { prepared(); await preparing; return null; } },
   });
   await writeFile(path.join(harness.directory, "video.mp4"), contents);
   harness.mediaVault.revokeTorrent = () => { revocations++; };

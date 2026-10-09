@@ -1,7 +1,7 @@
 {
   "name": "slyorrent",
   "productName": "Slyorrent",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "private": true,
   "description": "Client BitTorrent Windows local avec quarantaine, vérification, analyse Defender, médiathèque et lecteur intégré.",
   "author": "Slyreus",

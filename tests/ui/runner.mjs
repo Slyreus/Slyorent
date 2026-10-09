@@ -24,7 +24,8 @@ let delay = 0;
 const window = new BrowserWindow({ width: 1250, height: 900, show: false, webPreferences: { preload: path.join(path.dirname(fileURLToPath(import.meta.url)), "preload.cjs"), sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, backgroundThrottling: false, offscreen: true, autoplayPolicy: "no-user-gesture-required" } });
 window.webContents.setAudioMuted(true);
 window.webContents.session.protocol.handle("secutorrent-media", (request) => vault.handle(request));
-window.webContents.session.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !["file:", "secutorrent-media:"].includes(new URL(details.url).protocol) }));
+window.webContents.session.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !["file:", "blob:", "secutorrent-media:"].includes(new URL(details.url).protocol) }));
+window.webContents.session.webRequest.onHeadersReceived((details, callback) => callback({ responseHeaders: { ...details.responseHeaders, "Content-Security-Policy": ["default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: secutorrent-media:; connect-src 'self'"] } }));
 window.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
 window.webContents.on("console-message", (details) => { if (details.level === "error") console.error(details.message); });
 const timer = setTimeout(() => { console.log("FAIL Délai du test dépassé"); app.exit(1); }, 70_000);
@@ -37,7 +38,15 @@ ipcMain.handle("media-test", async (_event, method, params = {}) => {
       if (cancellations.has(params.requestId)) throw new Error("Préparation annulée.");
       const issued = vault.issue({ filePath, torrentKey: hash, ownerWebContentsId: window.webContents.id, mimeType: "video/mp4", name: "sample.mp4", expectedSize: file.size, expectedMtimeMs: file.mtimeMs });
       outstanding.add(issued.url);
-      return issued;
+      return { ...issued, audioLanguage: params.audioTrack === 2 ? "fre" : "jpn", selectedAudioTrack: params.audioTrack ?? 1,
+        audioTracks: [{ index: 1, language: "jpn", title: "", codec: "aac", channels: 2, default: true, forced: false }, { index: 2, language: "fre", title: "", codec: "aac", channels: 2, default: false, forced: false }],
+        subtitleTracks: [{ index: 3, language: "fre", title: "", codec: "ass", default: true, forced: false, supported: true }, { index: 4, language: "eng", title: "", codec: "subrip", default: false, forced: false, supported: true }],
+      };
+    }
+    case "openSubtitle": {
+      if (cancellations.has(params.requestId)) throw new Error("Préparation annulée.");
+      if (![3, 4].includes(params.trackIndex)) throw new Error("Piste de sous-titres introuvable.");
+      return { vtt: `WEBVTT\n\n00:00:00.000 --> 00:01:00.000\n${params.trackIndex === 3 ? "Sous-titres français de test" : "English test subtitles"}\n` };
     }
     case "renewMedia": return vault.renew(params.url, window.webContents.id);
     case "releaseMedia": outstanding.delete(params.url); return vault.release(params.url, window.webContents.id);

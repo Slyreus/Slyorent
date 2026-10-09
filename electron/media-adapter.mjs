@@ -10,6 +10,7 @@ import { canonicalPathWithoutLinks, UnsafePathError } from "./safe-path.mjs";
 import { resolveMediaBinaryPath } from "./media-binary-path.mjs";
 import { SharedPreparations } from "./shared-preparation.mjs";
 import { adaptationBudget, analyzeProbe, audioLanguage, conversionVideoArgs, localMediaInputArgs, MEDIA_CACHE_PROFILE, mediaProgressParser } from "./media-profile.mjs";
+import { cleanWebVtt, MAX_SUBTITLE_BYTES } from "./subtitles.mjs";
 export { analyzeProbe } from "./media-profile.mjs";
 
 const FFMPEG_SHA256 = "04e1307997530f9cf2fe35cba2ca7e8875ca91da02f89d6c7243df819c94ad00";
@@ -122,6 +123,8 @@ export class MediaAdapter {
   #ffprobe = null;
   #pending = new SharedPreparations();
   #analyses = new Map();
+  #subtitleCache = new Map();
+  #videoSources = new Map();
   #conversionTail = Promise.resolve();
   #protectedUntil = new Map();
   #isFileInUse;
@@ -154,7 +157,7 @@ export class MediaAdapter {
     const { stdout } = await runProcess(this.#ffprobe, [
       "-v", "error",
       ...localMediaInputArgs(sourcePath),
-      "-show_entries", "stream=index,codec_name,codec_type,channels,channel_layout,width,height,pix_fmt,color_transfer:stream_tags=language:stream_disposition=default,attached_pic:format=duration",
+      "-show_entries", "stream=index,codec_name,codec_type,channels,channel_layout,width,height,pix_fmt,color_transfer:stream_tags=language,title:stream_disposition=default,forced,attached_pic:format=duration",
       "-of", "json",
       "--", sourcePath,
     ], { timeoutMs: 30_000, maxStdout: MAX_PROBE_OUTPUT });
@@ -182,7 +185,7 @@ export class MediaAdapter {
     return total;
   }
 
-  async prepare({ sourcePath, sourceSize, sourceMtimeMs, signal, onProgress = () => undefined }) {
+  async inspect({ sourcePath, sourceSize, sourceMtimeMs, audioTrack, signal, onProgress = () => undefined }) {
     signal?.throwIfAborted();
     if (!this.#ffmpeg || !this.#ffprobe) throw new Error("Le moteur média local n'est pas initialisé.");
     const resolvedSource = await canonicalPathWithoutLinks(sourcePath);
@@ -191,12 +194,41 @@ export class MediaAdapter {
     onProgress({ stage: "probe", percent: null });
     const probeKey = JSON.stringify([resolvedSource, sourceSize, sourceMtimeMs]);
     if (!this.#analyses.has(probeKey)) {
-      const probe = this.#probe(resolvedSource).then(analyzeProbe).catch((error) => { this.#analyses.delete(probeKey); throw error; });
+      const probe = this.#probe(resolvedSource).catch((error) => { this.#analyses.delete(probeKey); throw error; });
       this.#analyses.set(probeKey, probe);
       while (this.#analyses.size > 128) this.#analyses.delete(this.#analyses.keys().next().value);
     }
-    const analysis = await this.#analyses.get(probeKey);
+    const analysis = analyzeProbe(await this.#analyses.get(probeKey), { audioTrack });
     signal?.throwIfAborted();
+    return { ...analysis, sourcePath: resolvedSource };
+  }
+
+  async extractSubtitle({ trackIndex, ...options }) {
+    const analysis = await this.inspect(options);
+    const track = analysis.subtitleTracks.find((item) => item.index === trackIndex);
+    if (!Number.isInteger(trackIndex) || !track) throw Object.assign(new Error("Piste de sous-titres introuvable."), { code: "MEDIA_SUBTITLE_TRACK_INVALID" });
+    if (!track.supported) throw Object.assign(new Error("Le format de cette piste de sous-titres n'est pas pris en charge."), { code: "MEDIA_SUBTITLE_UNSUPPORTED" });
+    const key = JSON.stringify([analysis.sourcePath, options.sourceSize, options.sourceMtimeMs, trackIndex]);
+    if (this.#subtitleCache.has(key)) return this.#subtitleCache.get(key);
+    return this.#pending.run(`subtitle:${key}`, options.signal, async (signal, report) => {
+      report({ stage: "subtitles", percent: null });
+      const { stdout } = await runProcess(this.#ffmpeg, [
+        "-nostdin", "-hide_banner", "-loglevel", "error", ...localMediaInputArgs(analysis.sourcePath),
+        "-i", analysis.sourcePath, "-map", `0:${trackIndex}`, "-vn", "-an", "-dn", "-map_metadata", "-1",
+        "-c:s", "webvtt", "-f", "webvtt", "pipe:1",
+      ], { timeoutMs: 60_000, maxStdout: MAX_SUBTITLE_BYTES, signal });
+      const after = await stat(analysis.sourcePath);
+      if (after.size !== options.sourceSize || after.mtimeMs !== options.sourceMtimeMs) throw new Error("Le média a changé pendant la lecture des sous-titres.");
+      const vtt = cleanWebVtt(stdout.toString("utf8"));
+      this.#subtitleCache.set(key, vtt);
+      while (this.#subtitleCache.size > 8) this.#subtitleCache.delete(this.#subtitleCache.keys().next().value);
+      return vtt;
+    }, options.onProgress);
+  }
+
+  async prepare({ sourcePath, sourceSize, sourceMtimeMs, audioTrack, signal, onProgress = () => undefined }) {
+    const analysis = await this.inspect({ sourcePath, sourceSize, sourceMtimeMs, audioTrack, signal, onProgress });
+    const resolvedSource = analysis.sourcePath;
     if (!analysis.needsAdaptation) return null;
     adaptationBudget(analysis, sourceSize);
     const key = outputCacheKey({
@@ -219,6 +251,11 @@ export class MediaAdapter {
     }).then((result) => {
       // Protéger aussi le fichier pendant l'analyse Defender, avant l'émission du jeton.
       this.#protectedUntil.set(result.filePath, Date.now() + 10 * 60_000);
+      if (analysis.videoAdapted) {
+        const videoKey = JSON.stringify([resolvedSource, sourceSize, sourceMtimeMs, analysis.video.index]);
+        this.#videoSources.set(videoKey, result);
+        while (this.#videoSources.size > 128) this.#videoSources.delete(this.#videoSources.keys().next().value);
+      }
       return result;
     }), onProgress);
   }
@@ -268,22 +305,29 @@ export class MediaAdapter {
     }
     const outputLimit = Math.floor(Math.min(MAX_CACHE_BYTES - retainedBytes, freeBytes - DISK_RESERVE_BYTES));
     const tempPath = path.join(this.#cacheDirectory, `${randomUUID()}.partial`);
+    const videoKey = JSON.stringify([resolvedSource, sourceSize, sourceMtimeMs, analysis.video.index]);
+    const previousVideo = analysis.videoAdapted ? this.#videoSources.get(videoKey) : null;
+    const previousInfo = previousVideo ? await lstat(previousVideo.filePath).catch(() => null) : null;
+    const reuseVideo = previousInfo?.isFile() && !previousInfo.isSymbolicLink()
+      && previousInfo.size === previousVideo.size && previousInfo.mtimeMs === previousVideo.mtimeMs
+      && containsPath(this.#cacheDirectory, previousVideo.filePath) ? previousVideo : null;
     try {
       const convert = async (encoder) => {
-        const stage = analysis.videoAdapted ? "video" : "audio";
-        const hardware = analysis.videoAdapted && encoder === "h264_nvenc";
+        const stage = analysis.videoAdapted && !reuseVideo ? "video" : "audio";
+        const hardware = analysis.videoAdapted && !reuseVideo && encoder === "h264_nvenc";
         onProgress({ stage, percent: 0, hardware });
         await runProcess(this.#ffmpeg, [
           "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-nostats", "-progress", "pipe:1", "-stats_period", "0.5",
           ...localMediaInputArgs(resolvedSource), "-threads", String(WORKER_THREADS), "-filter_threads", "2", "-i", resolvedSource,
-          "-map", `0:${analysis.video.index}`, ...(analysis.audio ? ["-map", `0:${analysis.audio.index}`] : []),
+          ...(reuseVideo ? [...localMediaInputArgs(reuseVideo.filePath), "-i", reuseVideo.filePath] : []),
+          "-map", reuseVideo ? "1:v:0" : `0:${analysis.video.index}`, ...(analysis.audio ? ["-map", `0:${analysis.audio.index}`] : []),
           "-map_metadata", "-1", "-map_chapters", "-1", "-sn", "-dn",
-          ...conversionVideoArgs(analysis, encoder, WORKER_THREADS),
+          ...(reuseVideo ? ["-c:v", "copy"] : conversionVideoArgs(analysis, encoder, WORKER_THREADS)),
           ...(analysis.audio ? ["-c:a", "aac", "-ac", "2", "-b:a", "192k", "-metadata:s:a:0", `language=${audioLanguage(analysis.audio)}`] : ["-an"]),
           "-fs", String(outputLimit), "-movflags", "+faststart", "-f", "mp4", tempPath,
         ], { timeoutMs: 2 * 60 * 60_000, signal, onStdout: mediaProgressParser(analysis.duration, ({ percent, finalizing }) => onProgress({ stage: finalizing ? "finalizing" : stage, percent, hardware })) });
       };
-      const encoder = analysis.videoAdapted ? await this.#preferredEncoder() : "libx264";
+      const encoder = analysis.videoAdapted && !reuseVideo ? await this.#preferredEncoder() : "libx264";
       try { await convert(encoder); }
       catch (error) {
         if (encoder !== "h264_nvenc" || signal.aborted || error.code !== "MEDIA_ADAPT_FAILED") throw error;
@@ -293,6 +337,10 @@ export class MediaAdapter {
       signal.throwIfAborted();
       const sourceAfter = await stat(resolvedSource);
       if (sourceAfter.size !== sourceSize || sourceAfter.mtimeMs !== sourceMtimeMs) throw new Error("Le média source a changé pendant sa préparation.");
+      if (reuseVideo) {
+        const after = await stat(reuseVideo.filePath);
+        if (after.size !== reuseVideo.size || after.mtimeMs !== reuseVideo.mtimeMs) throw new Error("La copie vidéo a changé pendant la préparation du son.");
+      }
       const tempInfo = await lstat(tempPath);
       if (!tempInfo.isFile() || tempInfo.isSymbolicLink() || tempInfo.size <= 0) throw new Error("La version compatible n'a pas été produite.");
       if (tempInfo.size >= outputLimit - 1024 * 1024) throw Object.assign(new Error("La conversion a atteint la limite du cache."), { code: "MEDIA_ADAPT_CACHE_LIMIT" });

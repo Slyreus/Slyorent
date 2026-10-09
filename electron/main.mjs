@@ -201,6 +201,7 @@ function registerIpc({ mainWindow, renderer, service, manager, audit, sharingHis
     ["remove", async (params) => service.remove(params)],
     ["setSeedPolicy", async (params) => service.setSeedPolicy(params)],
     ["openMedia", async (params, event) => service.openMedia(params, event.sender.id)],
+    ["openSubtitle", async (params, event) => service.openSubtitle(params, event.sender.id)],
     ["renewMedia", async ({ url }, event) => mediaVault.renew(url, event.sender.id)],
     ["releaseMedia", async ({ url }, event) => mediaVault.release(url, event.sender.id)],
     ["cancelMediaPreparation", async ({ requestId }, event) => service.cancelMediaPreparation(requestId, event.sender.id)],
