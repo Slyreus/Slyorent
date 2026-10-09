@@ -12,6 +12,7 @@ export function CastPanel({ getBridge, request, onDismiss, onStarted, onProgress
   const [discovery, setDiscovery] = useState<CastDiscovery | null>(null);
   const [selected, setSelected] = useState("");
   const [autoNext, setAutoNext] = useState(true);
+  const [seekDraft, setSeekDraft] = useState<number | null>(null);
   const [finding, setFinding] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState("");
   const dialog = useRef<HTMLDialogElement>(null);
   const scan = useCallback(async () => {
@@ -63,7 +64,7 @@ export function CastPanel({ getBridge, request, onDismiss, onStarted, onProgress
         <button type="button" aria-label="Épisode précédent sur l’appareil" disabled={busy || state.loading || !state.index} onClick={() => void control({ action: "previous" })}><SkipBack size={16} /></button>
         <button type="button" aria-label={state.playing ? "Mettre le cast en pause" : "Reprendre le cast"} disabled={busy || state.loading} onClick={() => void control({ action: state.playing ? "pause" : "play" })}>{state.playing ? <Pause size={16} /> : <Play size={16} />}</button>
         <button type="button" aria-label="Épisode suivant sur l’appareil" disabled={busy || state.loading || (state.index || 0) + 1 >= (state.total || 0)} onClick={() => void control({ action: "next" })}><SkipForward size={16} /></button>
-        <input type="range" min={0} max={1000} value={progress} aria-label="Position sur l’appareil" disabled={busy || state.loading || !state.duration} onChange={(event) => void control({ action: "seek", value: Number(event.target.value) / 1000 * (state.duration || 0) })} />
+        <input type="range" min={0} max={1000} value={seekDraft ?? progress} aria-label="Position sur l’appareil" disabled={busy || state.loading || !state.duration} onChange={(event) => setSeekDraft(Number(event.target.value))} onPointerUp={(event) => { const value = Number(event.currentTarget.value); setSeekDraft(null); void control({ action: "seek", value: value / 1000 * (state.duration || 0) }); }} onKeyUp={(event) => { if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"].includes(event.key)) { setSeekDraft(null); void control({ action: "seek", value: Number(event.currentTarget.value) / 1000 * (state.duration || 0) }); } }} />
         <small>{formatMediaTime(state.position || 0)} / {formatMediaTime(state.duration || 0)}</small>
       </div>}
       <div className="sly-cast-options"><label><input type="checkbox" checked={Boolean(state.autoNext)} disabled={busy} onChange={(event) => void control({ action: "autoNext", value: event.target.checked })} /> Épisode suivant automatique</label>

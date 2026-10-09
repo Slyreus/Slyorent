@@ -1,5 +1,5 @@
 const video = document.querySelector("#video"), captions = document.querySelector("#captions");
-let token, epoch = "", version = -1, busy = false, reporting = false, ended = false;
+let token, epoch = "", version = -1, busy = false, reporting = false, ended = false, wantsPlayback = false;
 async function api(path, data = {}) {
   const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(data), cache: "no-store" });
   const result = await response.json(); if (!response.ok) throw new Error(result.error || "Connexion interrompue."); return result;
@@ -25,7 +25,7 @@ async function poll() {
     const state = await api("/api/state");
     document.querySelector("#status").textContent = state.loading ? "Préparation sur le PC…" : state.error || "Connecté au PC";
     if (state.media && state.epoch !== epoch) {
-      epoch = state.epoch; ended = false; captions.replaceChildren();
+      epoch = state.epoch; ended = false; wantsPlayback = state.playing; captions.replaceChildren();
       video.pause(); video.replaceChildren(); video.src = state.media.url; document.querySelector("#title").textContent = state.media.title;
       if (state.media.subtitleUrl) {
         const track = document.createElement("track"); track.kind = "subtitles"; track.src = state.media.subtitleUrl; track.default = true;
@@ -33,14 +33,14 @@ async function poll() {
         track.track.addEventListener("cuechange", () => { captions.replaceChildren(...Array.from(track.track.activeCues || []).map((cue) => { const span = document.createElement("span"); span.textContent = cue.getCueAsHTML().textContent; return span; })); });
         video.append(track);
       }
-      video.addEventListener("loadedmetadata", () => { video.currentTime = Math.min(state.position || 0, video.duration); if (state.playing) void video.play().catch(() => { document.querySelector("#status").textContent = "Appuyez sur Lire pour démarrer."; }); }, { once: true });
+      video.addEventListener("loadedmetadata", () => { video.currentTime = Math.min(state.position || 0, video.duration); if (wantsPlayback) void video.play().catch(() => { document.querySelector("#status").textContent = "Appuyez sur Lire pour démarrer."; }); }, { once: true });
       video.load();
     }
     if (state.version !== version) {
       version = state.version;
       if (video.readyState >= 1 && state.command?.action === "seek") video.currentTime = state.command.value;
-      if (state.command?.action === "pause") video.pause();
-      if (state.command?.action === "play") void video.play().catch(() => undefined);
+      if (state.command?.action === "pause") { wantsPlayback = false; video.pause(); }
+      if (state.command?.action === "play") { wantsPlayback = true; void video.play().catch(() => undefined); }
       if (state.command?.action === "volume") video.volume = state.command.value;
     }
     await report();

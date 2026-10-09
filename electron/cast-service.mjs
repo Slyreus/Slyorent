@@ -86,6 +86,7 @@ export class CastService {
     s.transition = true; s.loading = true; s.playing = false; this.#sleep(true);
     try {
       await this.#save(s); s.index = index;
+      for (const [key, job] of s.prepared) if (key !== index && key !== index + 1) { s.prepared.delete(key); void job.then((entry) => this.#drop(s, entry)); }
       if (s.current) { if (s.client) await s.client.command("pause").catch(() => undefined); else { s.command = { action: "pause" }; s.version++; } }
       const entry = tracks ? await this.#prepare(s, index, tracks) : await (s.prepared.get(index) || Promise.resolve(null)) || await this.#prepare(s, index);
       s.prepared.delete(index);
@@ -99,7 +100,7 @@ export class CastService {
   #warm(s) {
     const index = s.index + 1;
     if (!s.autoNext || index >= s.queue.length || s.prepared.has(index) || this.#session !== s) return;
-    const job = this.#prepare(s, index).then((entry) => { if (this.#session !== s || !s.autoNext || index !== s.index + 1) { this.#drop(s, entry); return null; } job.ready = entry; return entry; }).catch(() => { s.prepared.delete(index); return null; });
+    const job = this.#prepare(s, index).then((entry) => { if (this.#session !== s || !s.autoNext || index !== s.index + 1 && !(s.transition && index === s.index) || s.prepared.get(index) !== job) { this.#drop(s, entry); return null; } job.ready = entry; return entry; }).catch(() => { if (s.prepared.get(index) === job) s.prepared.delete(index); return null; });
     s.prepared.set(index, job);
   }
   async #save(s, completed = false) {
@@ -154,7 +155,7 @@ export class CastService {
         for (const request of s.requests) this.#service.cancelMediaPreparation(request, s.owner);
         for (const [key, job] of s.prepared) { s.prepared.delete(key); void job.then((entry) => this.#drop(s, entry)); }
       }
-      void this.#load(s, index, params.action === "tracks" ? s.position : 0, params.action === "tracks" ? { audioTrack: params.audioTrack ?? s.current.access.selectedAudioTrack, subtitleTrack: params.subtitleTrack === undefined ? s.current.subtitleIndex : params.subtitleTrack } : undefined).catch((error) => this.#fail(s, error));
+      void this.#load(s, index, params.action === "tracks" ? s.position : 0, params.action === "tracks" ? { audioTrack: params.audioTrack ?? s.current.access.selectedAudioTrack ?? undefined, subtitleTrack: params.subtitleTrack === undefined ? s.current.subtitleIndex : params.subtitleTrack } : undefined).catch((error) => this.#fail(s, error));
     } else if (["play", "pause", "seek", "volume"].includes(params.action)) {
       if (["seek", "volume"].includes(params.action) && (!Number.isFinite(params.value) || params.value < 0 || params.value > (params.action === "volume" ? 1 : s.duration))) throw castError("Valeur invalide.");
       if (s.client) await s.client.command(params.action, params.value); else { s.command = { action: params.action, value: params.value }; s.version++; }
