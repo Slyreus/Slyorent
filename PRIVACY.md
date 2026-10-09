@@ -1,9 +1,11 @@
 # Données et réseau
 
-Slyorrent ne demande pas de compte et n’envoie pas de télémétrie à Slyreus. Les réglages, journaux, clés HMAC, torrents, fichiers temporaires et médias restent sur le PC.
+Slyorrent ne demande pas de compte et n’envoie pas de télémétrie à Slyreus. Les réglages, torrents, médias, fichiers temporaires, journaux et clés de contrôle restent sur le PC.
 
-BitTorrent n’est pas anonyme. Les trackers et les pairs contactés peuvent voir l’adresse IP utilisée, le client P2P et les volumes échangés. Les règles de chaque tracker continuent de s’appliquer.
+Les connexions BitTorrent passent par les trackers et les pairs. Ils peuvent voir l’adresse IP utilisée, le client et les volumes échangés. Slyorrent ne fournit pas de VPN et ne rend pas le P2P anonyme. Les règles des trackers restent les mêmes.
 
-La carte P2P reçoit du moteur les pairs réellement connectés, mais l’adresse brute ne passe pas dans l’interface et n’est pas écrite dans le journal. La géolocalisation est approximative et locale. La position Windows n’est demandée qu’après une action explicite, elle est arrondie et n’est pas conservée.
+La carte affiche des pairs réellement connectés, avec une position approximative calculée localement. Leurs adresses brutes ne sont pas transmises à l’interface ni écrites dans le journal.
 
-Microsoft Defender analyse localement les fichiers terminés. Slyorrent ne transmet pas les fichiers à un service d’analyse distant.
+La position Windows n’est demandée qu’à ton initiative. Les coordonnées sont arrondies et ne sont pas conservées.
+
+Les fichiers terminés et les copies de lecture passent par Microsoft Defender. Slyorrent ne les envoie pas à un service d’analyse distant.

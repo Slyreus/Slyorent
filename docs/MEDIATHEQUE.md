@@ -1,17 +1,21 @@
-# Classement de la médiathèque
+# Médiathèque
 
-Le classement est local. Les titres et les saisons viennent des noms des fichiers et des torrents. Aucune recherche de jaquette, aucun envoi du catalogue et aucun déplacement de fichier.
+La médiathèque classe les fichiers d’après leurs noms et ceux des torrents. Elle ne renomme rien, ne déplace rien et ne consulte pas de catalogue en ligne.
 
-La vue Titres rassemble les saisons d’une même série. Les variantes simples de ponctuation, de casse et d’accents sont rapprochées, ainsi que « and », « et » et « & ». Les années sont conservées pour distinguer les reprises d’un film. Des titres traduits ou très différents ne sont pas fusionnés automatiquement.
+La vue Titres réunit les saisons d’une série, même sur plusieurs torrents. Elle rapproche les différences simples de casse, d’accents et de ponctuation, ainsi que « and », « et » et « & ». Les années restent dans les titres pour distinguer deux versions d’un film. Des noms traduits ou très différents peuvent donc rester séparés.
 
-Un pack de films produit plusieurs titres. Les fichiers audio sont regroupés d’après leur torrent. Les copies d’un épisode restent visibles avec leur source ; la lecture enchaînée évite de rejouer les doublons. Le bouton Lire passe au premier épisode prêt et non vu, ou reprend le dernier épisode en cours.
+Dans un pack de films, chaque film a sa fiche. Les fichiers audio restent regroupés par torrent. Si tu as plusieurs copies d’un épisode, elles restent visibles avec leur source ; l’enchaînement ne rejoue pas les doublons.
 
-La vue Liste affiche les fichiers, avec ou sans regroupement par titre ou torrent. Les catégories, favoris, états de visionnage, disponibilité, torrent et saison se combinent avec la recherche. « saison 2 épisode 3 » et « S02E03 » ciblent les mêmes numéros. La recherche ignore les accents et accepte plusieurs mots.
+Le bouton Lire ouvre le premier épisode prêt et non vu, ou reprend l’épisode en cours. Le titre de la fiche donne accès aux fichiers et aux saisons. La vue Liste permet de parcourir les fichiers directement, avec un regroupement par titre, par torrent ou sans regroupement.
 
-Le tri porte sur le titre, la date d’ajout du torrent, la dernière lecture connue ou la taille. Pour une fiche regroupée, la date la plus récente et la taille totale des fichiers affichés sont utilisées. Sans date fournie par le moteur, aucune date n’est inventée.
+Tu peux combiner la recherche avec les catégories, les favoris, l’état de visionnage, la disponibilité, le torrent et la saison. « saison 2 épisode 3 » et « S02E03 » trouvent les mêmes numéros. La recherche ignore les accents.
 
-L’affichage, le regroupement, le tri et les favoris sont enregistrés dans `library-preferences.json`, dans le profil de l’application. Les filtres temporaires sont réinitialisés à la réouverture de la médiathèque. Un fichier de préférences illisible est conservé sans être écrasé. Le suivi reste dans son fichier existant, `watch-history.json`.
+Le tri peut se faire par titre, date d’ajout du torrent, dernière lecture ou taille. Pour un groupe, il utilise la date la plus récente et la taille totale des fichiers affichés. Si le moteur ne fournit pas de date, elle reste inconnue.
 
-Les fichiers incomplets ou non validés restent visibles, mais leur lecture est verrouillée. « Dossiers et vérifications » conserve l’accès à Vérifier et analyser et au dossier de chaque torrent. Le nouveau classement ne modifie ni la quarantaine, ni Defender, ni les réglages de partage.
+L’affichage, le tri, le regroupement et les favoris restent enregistrés. Les filtres temporaires repartent à zéro quand tu rouvres la médiathèque. Les préférences sont dans `library-preferences.json` et le suivi dans `watch-history.json`, dans le profil local. Un fichier de préférences illisible n’est pas écrasé.
 
-Les vues et filtres s’inspirent de la [bibliothèque Plex](https://support.plex.tv/articles/200392126-using-the-library-view/) et de la [séparation des contenus de Jellyfin](https://jellyfin.org/docs/general/server/libraries/), adaptés ici à une bibliothèque locale de torrents, sans serveur distant ni compte.
+Le lecteur propose la reprise, le plein écran, le choix audio et les sous-titres intégrés. Les menus de pistes sont sur la barre Précédent / Suivant. Pour une VO, les sous-titres français complets sont préférés ; pour du son français, seuls les sous-titres français forcés s’activent automatiquement. Tu peux toujours choisir autre chose.
+
+Les fichiers incomplets ou non validés restent visibles, mais ne peuvent pas être lus. « Dossiers et vérifications » donne accès à « Vérifier et analyser » et au dossier de chaque torrent.
+
+Les vues et filtres s’inspirent des bibliothèques [Plex](https://support.plex.tv/articles/200392126-using-the-library-view/) et [Jellyfin](https://jellyfin.org/docs/general/server/libraries/). Ici, tout reste dans une application locale.

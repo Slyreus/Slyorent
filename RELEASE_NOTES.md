@@ -1,11 +1,11 @@
-Le lecteur affiche maintenant les sous-titres intégrés. Ils étaient présents dans les fichiers, mais n’étaient pas chargés. Le menu Sous-titres permet de choisir la langue ou de les désactiver. Le français est activé automatiquement pour une VO.
+Les sous-titres intégrés sont disponibles dans le lecteur, avec le choix de la langue. En VO, le français s’active par défaut lorsqu’il est présent. Le texte s’affiche sans italique, sur un fond arrondi.
 
-Le menu Audio permet aussi de choisir la piste. La lecture reprend au même endroit, avec le même volume et la même vitesse. Si la vidéo a déjà été convertie, elle est réutilisée pour préparer le son choisi.
+Pour les fichiers avec plusieurs pistes audio, le menu Audio permet de choisir la langue. Le changement garde la position, le volume, la vitesse et l’état de pause. Une vidéo déjà convertie est réutilisée.
 
-Les réglages sont réunis sur la barre Précédent / Suivant pour laisser plus de place à la vidéo. Les sous-titres s’affichent en texte normal, sur un fond arrondi.
+Audio, Sous-titres, Précédent et Suivant sont sur la même barre. Le lecteur prend moins de place autour de la vidéo.
 
-Les sous-titres texte ASS, SSA, SRT et WebVTT sont lus localement. Les dialogues et leur minutage sont conservés, sans les polices ni les effets ASS. Les pistes sous forme d’images et les fichiers de sous-titres séparés ne sont pas encore pris en charge.
+Les pistes texte ASS, SSA, SRT, WebVTT et mov_text sont prises en charge. Les sous-titres sous forme d’images et les fichiers séparés ne le sont pas encore.
 
-Télécharge `Slyorrent-Setup-1.1.5.exe` et ferme Slyorrent avant l’installation. Tes torrents, tes réglages et ton suivi de lecture restent en place. Tout est dans le setup, y compris FFmpeg, FFprobe et Transmission.
+Pour la mise à jour, ferme Slyorrent et lance `Slyorrent-Setup-1.1.5.exe`. Les torrents, les réglages et le suivi restent en place. FFmpeg, FFprobe et Transmission sont inclus dans le setup.
 
-L’installateur n’a pas encore de certificat Authenticode. Windows peut afficher « éditeur inconnu ». Les empreintes sont dans `SHA256SUMS.txt` et les sources exactes des moteurs sont jointes à la release.
+L’installateur n’est pas encore signé : Windows peut afficher « éditeur inconnu ». Les empreintes sont dans `SHA256SUMS.txt`. Les archives de sources jointes ne sont pas nécessaires à l’installation.

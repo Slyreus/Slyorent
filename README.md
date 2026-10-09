@@ -1,88 +1,44 @@
 # Slyorrent
 
-Slyorrent, c’est mon client torrent Windows local. Le but est simple : ajouter un magnet ou un `.torrent`, télécharger dans une quarantaine, vérifier les pièces, lancer Microsoft Defender, puis déplacer ce qui est propre dans la médiathèque et commencer le partage.
+J’ai créé Slyorrent pour télécharger et partager mes torrents, puis retrouver mes vidéos au même endroit. C’est une application Windows, avec une médiathèque et un lecteur intégré. Elle fonctionne en local, sans compte ni cloud. Slyorus, le hibou, est la mascotte.
 
-Il n’y a pas de compte, pas de cloud et pas de télémétrie distante. L’interface, les réglages, les journaux et les médias restent sur le PC. Le P2P contacte évidemment les trackers et les pairs : ils peuvent voir ton adresse IP et les volumes échangés.
+Pour l’installer, prends le setup dans la [dernière release](https://github.com/Slyreus/Slyorent/releases/latest). Lance-le, puis ouvre Slyorrent avec le raccourci du bureau. FFmpeg, FFprobe et Transmission sont déjà inclus. Il n’y a rien à installer en plus. Les archives de sources jointes à la release ne sont pas nécessaires pour utiliser l’application.
 
-## Installer Slyorrent
+Il faut Windows 10 ou 11 en 64 bits. L’installateur n’est pas encore signé avec un certificat Authenticode : Windows peut donc afficher « éditeur inconnu ». Le fichier `SHA256SUMS.txt` contient les empreintes de l’installateur et des archives.
 
-Télécharge le setup dans la [dernière release](https://github.com/Slyreus/Slyorent/releases/latest), lance-le, puis ouvre Slyorrent depuis le raccourci créé sur le bureau.
+Tu peux ajouter un magnet ou un fichier `.torrent`. Au moment de l’ajout, tu choisis le dossier final et si tu veux un sous-dossier. Par défaut, la bibliothèque est dans `Documents/Slyorrent`. Les téléchargements passent d’abord par la quarantaine. Une fois terminés, les pièces sont vérifiées et les fichiers analysés par Microsoft Defender, avant le déplacement dans le dossier choisi et le partage complet.
 
-Le setup contient déjà FFmpeg, FFprobe et Transmission. Rien à installer en plus. Les archives `source.tar.gz` de la release sont les sources des moteurs, publiées avec leurs licences ; elles ne sont pas nécessaires pour utiliser Slyorrent.
+Pour ouvrir un `.torrent` depuis Windows, fais un clic droit, « Ouvrir avec », puis choisis Slyorrent. Ton application par défaut ne change pas. Si Slyorrent est déjà ouvert, le fichier arrive dans la même fenêtre.
 
-Sur un fichier `.torrent`, fais un clic droit, « Ouvrir avec », puis choisis Slyorrent. Windows peut le ranger dans « Choisir une autre application ». L’installation ajoute ce choix sans remplacer ton application par défaut. Le fichier s’ouvre dans la fenêtre existante, avec le choix du dossier et la confirmation habituelle avant l’ajout en pause.
+La médiathèque réunit les saisons d’une série, même quand elles viennent de plusieurs torrents. Tu peux chercher un titre ou un épisode, trier, filtrer et mettre des titres en favoris. La vue Liste donne directement accès aux fichiers. Le suivi indique ce que tu as regardé et le lecteur te propose de reprendre là où tu t’es arrêté. Le classement ne renomme pas les fichiers et ne cherche pas de jaquettes en ligne. Les détails sont dans [Médiathèque](docs/MEDIATHEQUE.md).
 
-Slyorrent remplace le nom Slyorent. Le profil, les dossiers déjà choisis et les torrents restent au même endroit. Le dépôt GitHub garde son adresse.
+La langue audio et les sous-titres se choisissent dans la barre du lecteur, à côté de Précédent et Suivant. En VO, le français s’active par défaut lorsqu’il est disponible. Les sous-titres texte intégrés ASS, SSA, SRT, WebVTT et mov_text sont pris en charge, mais pas encore les pistes sous forme d’images ni les fichiers de sous-titres séparés.
 
-L’installateur est prévu pour Windows 10 et 11 en 64 bits. Microsoft Defender doit être disponible pour la validation complète. Il n’y a pas encore de certificat Authenticode, donc Windows peut afficher « éditeur inconnu ». Le SHA-256 publié avec la release permet de vérifier que le fichier téléchargé est bien celui que j’ai construit.
+Certains formats, comme le HEVC ou le son E-AC3, demandent une conversion pour le lecteur. Elle se fait sur le PC, sans modifier l’original. La première lecture peut prendre quelques minutes ; les suivantes réutilisent la copie en cache. Une carte NVIDIA compatible peut accélérer la conversion. Le cache est limité à 12 Go et les copies passent aussi par Defender.
 
-## Ce qu’il y a dans l’application
+Pour le partage, tu peux définir des paramètres globaux, garder des limites par torrent ou tout arrêter. Le volume envoyé est affiché en plus du ratio. Le diagnostic permet de vérifier le port, les trackers et les connexions. Le moteur est Transmission 4.1.3 : le débit dépend aussi de la demande et des autres pairs. Aucun client ne peut garantir du partage ou des points sur un tracker.
 
-- ajout de magnets et de fichiers `.torrent` ;
-- choix du dossier final et du sous-dossier avant le téléchargement ;
-- quarantaine locale, vérification BitTorrent et analyse Defender ;
-- médiathèque par titres ou en liste, saisons réunies, favoris, tris et filtres combinables ;
-- lecture directe, suivi de visionnage et reprise ;
-- lecteur plein écran avec conversion locale HEVC 10 bits et audio AC3, E-AC3, DTS et TrueHD ;
-- choix des pistes audio et des sous-titres intégrés, avec activation du français pour la VO ;
-- partage global, limites individuelles, ratio et volume réellement envoyé ;
-- diagnostic du port, des trackers, des pairs et des demandes de blocs ;
-- carte P2P locale avec positions approximatives et adresses anonymisées avant affichage ;
-- journal local chaîné pour rendre les altérations détectables.
+La carte P2P est un gadget. Les tirs bleus représentent l’envoi, les rouges la réception, avec une intensité liée au débit. Les pairs sont réels, leurs positions approximatives. Ce n’est pas le trajet exact des données.
 
-Le moteur P2P est Transmission 4.1.3. Slyorrent ne fabrique pas de trafic, ne force pas les pairs à choisir ce client et ne garantit aucun point ou ratio sur une communauté externe.
+Les réglages, le suivi de lecture et les journaux restent sur le PC. Il n’y a pas de VPN fourni avec Slyorrent. Comme avec les autres clients torrent, les pairs et les trackers voient l’adresse IP utilisée. Un contrôle BitTorrent valide les pièces reçues, pas la sécurité du contenu, et un antivirus ne garantit pas qu’un fichier est sans risque. Utilise des contenus que tu as le droit de télécharger et de partager. [Données et réseau](PRIVACY.md) donne les détails.
 
-## Construire le projet
-
-Il faut Node.js 24, Windows x64 et PowerShell 5.1 ou plus récent.
+Pour lancer le projet, il faut Windows x64, Node.js 24 et PowerShell 5.1 ou plus récent :
 
 ```powershell
 npm ci
 npm run engine:install
+npm run local
+```
+
+Pour les vérifications et l’installateur :
+
+```powershell
 npm run check
 npm run release:win
 ```
 
-L’installateur sort dans `release/Slyorrent-Setup-1.1.5.exe`. Le build utilise une liste blanche de fichiers : les torrents, journaux, profils, clés, contenus téléchargés, caches et chemins personnels ne sont pas intégrés.
+Le setup est créé dans `release/`. Les profils, torrents, médias, journaux et clés locales ne sont pas inclus. Les commandes `test:media-ui`, `test:catalog-ui`, `test:map-ui` et `test:packaged-media` utilisent des données fictives dans des profils séparés.
 
-Le logo source est dans `public/slyorrent-logo.svg` : un hibou blanc sans bec, sur un carré bleu arrondi. `npm run icons:build` produit le PNG transparent et l’icône Windows en sept tailles, de 16 à 256 pixels. Le rendu se fait localement avec Electron, sans service externe. Les tests vérifient la transparence des coins et la lecture réelle de l’icône par Windows.
+Le code est sous licence MIT. Le nom Slyorrent, le nom Slyorus et la mascotte gardent leurs propres conditions, précisées dans [LICENSE](LICENSE). Les licences des moteurs sont dans [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Pour signaler une faille, consulte [SECURITY.md](SECURITY.md).
 
-Pour lancer simplement la version de développement locale :
-
-```powershell
-npm run local
-```
-
-La vue Titres réunit les saisons d’une série, même réparties sur plusieurs torrents. Un pack de films garde une fiche par film. Un clic sur Lire lance un fichier prêt ou propose sa reprise ; un clic sur le titre affiche les fichiers, avec les saisons en accès direct. La vue Liste donne accès aux fichiers sans ouvrir de fiche.
-
-Films, séries, audio, favoris, fichiers prêts, non vus ou à reprendre : les filtres se combinent avec la recherche, le torrent et la saison. Le tri se fait par titre, date d’ajout du torrent, dernière lecture ou taille. L’affichage, le regroupement, le tri et les favoris restent enregistrés sur le PC. Le suivi existant est conservé.
-
-Ce classement utilise les noms locaux, pas un catalogue en ligne. Aucun fichier n’est déplacé ou renommé. Le torrent d’origine reste visible, avec ses actions de vérification et d’ouverture du dossier. Les limites du classement sont précisées dans [docs/MEDIATHEQUE.md](docs/MEDIATHEQUE.md).
-
-Le lecteur prépare l’épisode suivant en arrière-plan. Une vidéo HEVC ou un son incompatible est converti en copie H.264/AAC, avec la piste française si elle existe. La progression apparaît pendant la préparation. L’original ne change pas. NVIDIA est utilisé si un test local confirme sa disponibilité ; sinon la conversion passe sur le processeur. Les sources HDR sont adaptées en SDR pour ce lecteur.
-
-La première ouverture peut prendre plusieurs minutes. Les suivantes réutilisent la copie locale, tant qu’elle est en cache. Une seule conversion tourne à la fois, avec un cache limité à 12 Go et un contrôle de l’espace libre. Fermer le lecteur annule les préparations qui ne servent plus. Les fichiers convertis passent aussi par Defender avant lecture.
-
-Dans le lecteur, les menus Audio et Sous-titres donnent accès aux pistes du fichier d’origine. Le changement d’audio garde la position, la pause, le volume et la vitesse. Une vidéo HEVC déjà préparée est réutilisée pour éviter de la réencoder à chaque changement de son. Les sous-titres français complets sont activés pour une VO ; avec du son français, seuls les sous-titres français forcés le sont par défaut. Le choix manuel reste disponible.
-
-Les sous-titres texte intégrés ASS, SSA, SRT, WebVTT et mov_text sont convertis localement pour le lecteur. Le minutage et les dialogues sont conservés, avec un texte normal sur fond arrondi, sans les polices ni la mise en page ASS. Audio, sous-titres et navigation entre épisodes partagent la même barre. Les pistes sous forme d’images, comme PGS ou VobSub, sont signalées comme non prises en charge. Les fichiers de sous-titres séparés ne sont pas encore importés. Aucun sous-titre n’est recherché ou téléchargé en ligne.
-
-`npm run test:media-ui` teste le lecteur Electron avec une vidéo synthétique, dans un profil temporaire séparé. Il ne lance pas le moteur torrent et ne lit pas la bibliothèque personnelle.
-
-`npm run test:catalog-ui` vérifie le classement, les filtres, la persistance des favoris et du tri, la pagination et l’affichage en petite fenêtre. Il utilise lui aussi des médias fictifs et un profil séparé.
-
-`npm run test:packaged-media` teste les modules du lecteur depuis `release/win-unpacked/resources/app.asar`, avec un MKV HEVC 10 bits et une piste française E-AC3 synthétiques. Il vérifie les moteurs embarqués, la conversion H.264/AAC, le cache et le décodage audio/vidéo dans Electron. Ce test fait aussi partie de `npm run dist:win`.
-
-La carte locale passe en vue stratégique, avec des tirs bleus à l’envoi et rouges à la réception, des traînées et des impacts. Le débit règle leur intensité. Les pairs sont regroupés par zone, le détail s’ouvre au clic et la carte passe en plein écran. Les tirs sont décoratifs : ce ne sont ni des paquets individuels, ni le chemin réel pris par les données. Sans transfert ou avec des données périmées, aucun tir.
-
-La carte et la géolocalisation des pairs restent hors ligne. La base utilise seulement la position Windows demandée ou les coordonnées saisies. Les animations peuvent être figées ; elles s’arrêtent hors écran et respectent les réglages de réduction des mouvements. `npm run test:map-ui` vérifie la carte avec des données fictives, sans accéder au moteur ni aux positions personnelles.
-
-## À savoir
-
-Un hash BitTorrent confirme les pièces reçues, pas la légalité ni l’innocuité du contenu. Utilise seulement des contenus que tu as le droit de télécharger et de partager.
-
-Un port fermé réduit les connexions entrantes mais n’empêche pas toutes les connexions sortantes. Un VPN n’est pas fourni par l’application. Si tu en utilises un, sa configuration et son coupe-circuit restent sous ta responsabilité.
-
-Le code Slyorrent est publié sous licence MIT. Le nom Slyorrent, le nom Slyorus et la mascotte ne sont pas inclus dans cette licence. Les moteurs intégrés gardent leurs propres licences, détaillées dans [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
-Les failles ne doivent pas être mises directement dans une issue publique. La marche à suivre est dans [SECURITY.md](SECURITY.md).
+Le projet s’appelait auparavant Slyorent. Le nom a changé, pas l’adresse du dépôt. Les mises à jour conservent les torrents, les dossiers choisis et le suivi de lecture.
