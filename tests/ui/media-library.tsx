@@ -48,6 +48,7 @@ function chooseTrack(label: string, value: string) {
 const subtitleText = () => (currentVideo()?.textTracks[0]?.activeCues?.[0] as VTTCue | undefined)?.text;
 
 async function run() {
+  await invoke("resize");
   render();
   await until(() => Boolean(document.querySelector("[aria-label='Vue Liste']:not(:disabled)")), "Préférences non chargées");
   click("[aria-label='Vue Liste']");
@@ -67,7 +68,8 @@ async function run() {
   const stage = document.querySelector<HTMLElement>(".sly-media-stage.video")!;
   const captionStyle = getComputedStyle(caption);
   const fontSize = Number.parseFloat(captionStyle.fontSize);
-  assert(fontSize > 30 && captionStyle.whiteSpace === "normal", "Les sous-titres doivent être agrandis et revenir à la ligne selon la place disponible");
+  const captionFitsStage = () => Math.abs(Number.parseFloat(getComputedStyle(caption).fontSize) - Math.min(64, Math.max(18, 10 + stage.clientWidth * .016))) < .25;
+  assert(captionFitsStage() && captionStyle.whiteSpace === "normal", `Les sous-titres doivent suivre la taille du lecteur : ${stage.clientWidth}px, police ${fontSize}px, espaces ${captionStyle.whiteSpace}`);
   assert(caption.offsetWidth > stage.clientWidth * .85 && caption.offsetWidth < stage.clientWidth, "Les sous-titres restent trop étroits ou débordent");
   assert(caption.clientHeight - Number.parseFloat(captionStyle.paddingTop) - Number.parseFloat(captionStyle.paddingBottom) < Number.parseFloat(captionStyle.lineHeight) * 2.5, "Les retours à la ligne du fichier créent encore un bloc trop dense");
   const castButton = document.querySelector<HTMLElement>("[data-player-cast]")!;
@@ -76,16 +78,18 @@ async function run() {
   await invoke("capture", { name: "player-captions" });
   const player = document.querySelector<HTMLElement>(".sly-media-player")!;
   player.classList.add("is-fallback-fullscreen");
+  player.style.width = "1920px"; player.style.height = "1080px";
   await invoke("resize", { wide: true });
-  await until(() => Number.parseFloat(getComputedStyle(caption).fontSize) > fontSize * 1.5, "La taille des sous-titres ne suit pas le plein écran");
+  await until(() => captionFitsStage() && Number.parseFloat(getComputedStyle(caption).fontSize) > fontSize * 1.25, "La taille des sous-titres ne suit pas le plein écran");
   await invoke("capture", { name: "player-captions-wide" });
   player.classList.remove("is-fallback-fullscreen");
+  player.style.removeProperty("width"); player.style.removeProperty("height");
   await invoke("resize", { small: true });
-  await until(() => stage.clientWidth < 530 && Number.parseFloat(getComputedStyle(caption).fontSize) === 20, "Les sous-titres ne s'adaptent pas au petit lecteur");
+  await until(() => stage.clientWidth < 530 && captionFitsStage() && Number.parseFloat(getComputedStyle(caption).fontSize) < fontSize, "Les sous-titres ne s'adaptent pas au petit lecteur");
   assert(caption.offsetWidth <= stage.clientWidth && caption.scrollWidth <= caption.clientWidth, "Les sous-titres débordent du petit lecteur");
   await invoke("capture", { name: "player-captions-small" });
   await invoke("resize");
-  await until(() => Number.parseFloat(getComputedStyle(caption).fontSize) > 30, "La taille du lecteur n'est pas rétablie");
+  await until(() => captionFitsStage() && Math.abs(Number.parseFloat(getComputedStyle(caption).fontSize) - fontSize) < .25, "La taille du lecteur n'est pas rétablie");
   await video.play();
   video.textTracks[0].mode = "disabled";
   await until(() => document.querySelector<HTMLSelectElement>("[aria-label='Sous-titres']")?.value === "", "Désactivation native des sous-titres non suivie");

@@ -126,10 +126,10 @@
 .sly-media-track-controls select:focus-visible { outline: 2px solid #49d2ff; outline-offset: 2px; }
 .sly-media-track-controls select:disabled { opacity: .55; }
 .sly-media-subtitle-loading { display: inline-flex; align-items: center; gap: 5px; color: #85dfff; font-size: 11px; }
-.sly-media-stage video::cue { color: #fff; background: #000b; font-family: Arial, sans-serif; font-size: clamp(20px, 3vw, 96px); font-style: normal; }
+.sly-media-stage video::cue { color: #fff; background: #000b; font-family: Arial, sans-serif; font-size: clamp(18px, calc(10px + 1.6vw), 64px); font-style: normal; }
 .sly-media-stage video::-webkit-media-controls-toggle-closed-captions-button { display: none; }
 .sly-media-captions { position: absolute; z-index: 3; bottom: clamp(48px, 5.5cqw, 80px); left: 3%; right: 3%; display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; }
-.sly-media-caption-line { box-sizing: border-box; min-width: 0; max-width: 100%; padding: clamp(5px, .5cqw, 12px) clamp(10px, 1cqw, 28px); border-radius: 10px; background: #02080edb; color: #fff; text-align: center; white-space: normal; text-wrap: pretty; overflow-wrap: break-word; font-family: Arial, sans-serif; font-size: clamp(20px, 3cqw, 96px); font-style: normal; font-weight: 500; line-height: 1.3; text-shadow: 0 1px 2px #000; box-shadow: 0 2px 10px #0003; }
+.sly-media-caption-line { box-sizing: border-box; min-width: 0; max-width: 100%; padding: clamp(5px, .5cqw, 12px) clamp(10px, 1cqw, 28px); border-radius: 10px; background: #02080edb; color: #fff; text-align: center; white-space: normal; text-wrap: pretty; overflow-wrap: break-word; font-family: Arial, sans-serif; font-size: clamp(18px, calc(10px + 1.6cqw), 64px); font-style: normal; font-weight: 500; line-height: 1.3; text-shadow: 0 1px 2px #000; box-shadow: 0 2px 10px #0003; }
 .sly-media-subtitle-error { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .sly-media-subtitle-error button { border: 1px solid #ffffff35; border-radius: 6px; background: #ffffff0b; color: #fff; padding: 5px 9px; font-size: 11px; }
 .sly-media-player > footer { flex-shrink: 0; min-height: 54px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 16px; padding: 9px 16px; background: #071727; }
