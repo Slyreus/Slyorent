@@ -74,6 +74,8 @@ ipcMain.handle("media-test", async (_event, method, params = {}) => {
     case "resize": window.setContentSize(params.wide ? 1920 : params.small ? 520 : 1250, params.wide ? 1080 : 900); return true;
     case "capture": {
       if (!["catalog-titles", "catalog-series", "catalog-small", "player-captions", "player-captions-wide", "player-captions-small"].includes(params.name)) throw new Error("Capture inconnue.");
+      // Les aperçus du lecteur servent au contrôle visuel local ; les mesures de mise en page restent vérifiées en CI.
+      if (process.env.GITHUB_ACTIONS === "true" && params.name.startsWith("player-")) return true;
       const output = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../.runtime/catalog-preview");
       await mkdir(output, { recursive: true });
       window.webContents.invalidate();
