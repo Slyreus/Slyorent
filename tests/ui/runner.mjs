@@ -47,7 +47,7 @@ ipcMain.handle("media-test", async (_event, method, params = {}) => {
     case "openSubtitle": {
       if (cancellations.has(params.requestId)) throw new Error("Préparation annulée.");
       if (![3, 4].includes(params.trackIndex)) throw new Error("Piste de sous-titres introuvable.");
-      return { vtt: `WEBVTT\n\n00:00:00.000 --> 00:01:00.000\n${params.trackIndex === 3 ? "Sous-titres français de test" : "English test subtitles"}\n` };
+      return { vtt: `WEBVTT\n\n00:00:00.000 --> 00:01:00.000\n${params.trackIndex === 3 ? "Sous-titres français de test.\nNous retrouverons le chemin\net rejoindrons la ville avant la tombée de la nuit." : "English test subtitles"}\n` };
     }
     case "castDiscover": return { devices: [{ id: "tv-test", kind: "chromecast", name: "TV de test", model: "Test" }], networks: [{ id: "network-test", name: "Réseau de test", address: "192.168.1.10" }] };
     case "castStatus": return castState;
@@ -71,9 +71,9 @@ ipcMain.handle("media-test", async (_event, method, params = {}) => {
     case "metrics": return { calls, outstanding: outstanding.size };
     case "verifyAndScan": calls.push({ action: "verifyAndScan", id: params.id }); return { ok: true };
     case "openTorrentDirectory": calls.push({ action: "openTorrentDirectory", id: params.id }); return { ok: true };
-    case "resize": window.setContentSize(params.small ? 520 : 1250, 900); return true;
+    case "resize": window.setContentSize(params.wide ? 1920 : params.small ? 520 : 1250, params.wide ? 1080 : 900); return true;
     case "capture": {
-      if (!["catalog-titles", "catalog-series", "catalog-small"].includes(params.name)) throw new Error("Capture inconnue.");
+      if (!["catalog-titles", "catalog-series", "catalog-small", "player-captions", "player-captions-wide", "player-captions-small"].includes(params.name)) throw new Error("Capture inconnue.");
       const output = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../.runtime/catalog-preview");
       await mkdir(output, { recursive: true });
       window.webContents.invalidate();
