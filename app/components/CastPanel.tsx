@@ -67,8 +67,18 @@ export function CastPanel({ getBridge, request, onDismiss, onStarted, onProgress
     return () => window.cancelAnimationFrame(frame);
   }, [state.active, request]);
   useEffect(() => {
-    const list = queueList.current, current = list?.querySelector<HTMLElement>("[aria-current='true']");
-    if (list && current) list.scrollTop = Math.max(0, current.offsetTop - list.offsetTop - 8);
+    const list = queueList.current;
+    if (!list) return;
+    const keepVisible = () => {
+      const current = list.querySelector<HTMLElement>("[aria-current='true']");
+      if (!current) return;
+      const item = current.getBoundingClientRect(), bounds = list.getBoundingClientRect();
+      if (item.top < bounds.top) list.scrollTop += item.top - bounds.top - 4;
+      else if (item.bottom > bounds.bottom) list.scrollTop += item.bottom - bounds.bottom + 4;
+    };
+    const resize = new ResizeObserver(keepVisible); resize.observe(list);
+    const frame = window.requestAnimationFrame(keepVisible);
+    return () => { resize.disconnect(); window.cancelAnimationFrame(frame); };
   }, [state.index, queueOpen]);
   async function start(retry?: CastStart) {
     if (mutating.current || !retry && (!request || !selected)) return;

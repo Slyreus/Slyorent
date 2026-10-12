@@ -205,6 +205,7 @@ async function run() {
   assert(castPanel.scrollWidth <= castPanel.clientWidth, "Le suivi du cast déborde de la petite fenêtre");
   const castQueue = document.querySelector<HTMLOListElement>(".sly-cast-queue ol")!;
   assert(castQueue.scrollWidth <= castQueue.clientWidth, "La file d’épisodes crée un défilement horizontal");
+  await until(() => { const current = castQueue.querySelector("[aria-current='true']")!.getBoundingClientRect(), bounds = castQueue.getBoundingClientRect(); return current.top >= bounds.top - 1 && current.bottom <= bounds.bottom + 1; }, "L’épisode en cours est masqué dans la file après redimensionnement");
   await invoke("capture", { name: "player-cast-small" });
   await invoke("resize");
   await invoke("castFailure");
