@@ -39,6 +39,8 @@ export function MediaPlayer({ episode, initialRecord, session, getBridge, previo
   const [subtitleError, setSubtitleError] = useState("");
   const [subtitleAttempt, setSubtitleAttempt] = useState(0);
   const [captionLines, setCaptionLines] = useState<string[]>([]);
+  const [castOpening, setCastOpening] = useState(false);
+  const [castError, setCastError] = useState("");
   const dialogRef = useRef<HTMLDialogElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
   const mediaRef = useRef<HTMLMediaElement | null>(null);
@@ -341,6 +343,29 @@ export function MediaPlayer({ episode, initialRecord, session, getBridge, previo
     catch { setFallbackFullscreen(true); }
   }
 
+  function togglePlayback() {
+    const media = mediaRef.current;
+    if (!media || !initialized.current || resumePrompt || loading || error) return;
+    if (!media.paused) media.pause();
+    else {
+      wantsPlayback.current = true;
+      void media.play().catch(() => { if (alive.current) setSaveError("Lecture indisponible. Réessayez."); });
+    }
+  }
+
+  async function beginCast() {
+    if (!source || !onCast || castOpening) return;
+    setCastOpening(true); setCastError(""); save();
+    const options = { position: checkpoint.current.position, audioTrack: audioIndex ?? undefined, subtitleTrack: subtitleIndex };
+    mediaRef.current?.pause(); wantsPlayback.current = false; setPlaying(false);
+    setFallbackFullscreen(false);
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      if (alive.current) onCast(options);
+    } catch (caught) { if (alive.current) setCastError(caught instanceof Error ? caught.message : "Ouverture du cast impossible."); }
+    finally { if (alive.current) setCastOpening(false); }
+  }
+
   function close() { save(); onClose(); }
   function select(item: MediaEpisode) { save(); onSelect(item); }
   const expanded = fullscreen || fallbackFullscreen;
@@ -368,6 +393,7 @@ export function MediaPlayer({ episode, initialRecord, session, getBridge, previo
             {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
             <audio key={source.url} ref={attachMedia} src={source.url} controls preload="auto" controlsList="nodownload" aria-label={`Lecture audio de ${episode.episodeTitle}`} {...events} />
           </div>)}
+        {source && episode.kind === "video" && <button type="button" className="sly-media-surface-toggle" aria-label={playing ? "Mettre la vidéo en pause" : "Reprendre la vidéo"} disabled={loading || resumePrompt || Boolean(error) || castOpening} onClick={togglePlayback}>{!playing && !loading && !resumePrompt && !error && <CirclePlay size={52} aria-hidden="true" />}</button>}
         {episode.kind === "video" && subtitle?.index === subtitleIndex && !subtitleError && captionLines.length > 0 && <div className="sly-media-captions" aria-live="off">{captionLines.map((line, index) => <span className="sly-media-caption-line" key={`${index}:${line}`}>{line}</span>)}</div>}
         {resumePrompt && !error && <div className="sly-media-player-overlay sly-media-resume-prompt"><Clock3 size={30} /><h3>Reprendre la lecture ?</h3><p>Arrêt à {formatMediaTime(initialRecord?.position || 0)} sur {formatMediaTime(initialRecord?.duration || 0)}</p><div><button type="button" className="sly-media-primary" onClick={() => chooseStart(initialRecord?.position || 0)}><CirclePlay size={17} /> Reprendre à {formatMediaTime(initialRecord?.position || 0)}</button><button type="button" onClick={() => chooseStart(0)}><RotateCcw size={15} /> Depuis le début</button></div></div>}
         {!resumePrompt && (loading || buffering) && !error && <div className="sly-media-player-overlay sly-media-loading" role="status"><LoaderCircle size={28} className="sly-media-spin" /><span>{source && !preparation ? "Chargement de la lecture…" : preparationLabel}</span>{preparation?.percent !== null && preparation?.percent !== undefined && <div className="sly-media-conversion-progress"><progress max={100} value={preparation.percent} aria-label="Préparation du média" /><b>{preparation.percent} %</b></div>}{!source && preparation?.stage === "video" && <small>{preparation.hardware ? "Accélération NVIDIA" : "Conversion sur le processeur"} · Original conservé</small>}{!source && <small>La copie compatible sera réutilisée aux prochaines lectures.</small>}</div>}
@@ -380,10 +406,11 @@ export function MediaPlayer({ episode, initialRecord, session, getBridge, previo
         {episode.kind === "video" && <label><Captions size={16} /><span>Sous-titres</span><select aria-label="Sous-titres" value={subtitleIndex ?? ""} disabled={!source.subtitleTracks?.some((track) => track.supported !== false)} onChange={(event) => chooseSubtitle(event.target.value)}><option value="">{source.subtitleTracks?.length ? "Désactivés" : "Aucun sous-titre intégré"}</option>{source.subtitleTracks?.map((track) => <option key={track.index} value={track.index} disabled={track.supported === false}>{trackLabel(track)}</option>)}</select></label>}
         {subtitleIndex !== null && (!subtitle || subtitle.index !== subtitleIndex) && !subtitleError && <span className="sly-media-subtitle-loading" role="status"><LoaderCircle size={14} className="sly-media-spin" /> Chargement…</span>}
       </div>}
-      {onCast && episode.kind === "video" && <button type="button" className="sly-media-cast-button" data-player-cast disabled={!source} onClick={() => { save(); mediaRef.current?.pause(); wantsPlayback.current = false; setPlaying(false); onCast({ position: checkpoint.current.position, audioTrack: audioIndex ?? undefined, subtitleTrack: subtitleIndex }); }}><Cast size={16} /> Caster</button>}
+      {onCast && episode.kind === "video" && <button type="button" className="sly-media-cast-button" data-player-cast disabled={!source || castOpening} onClick={() => void beginCast()}>{castOpening ? <LoaderCircle size={16} className="sly-media-spin" /> : <Cast size={16} />}{castOpening ? "Ouverture…" : "Caster"}</button>}
       <span className="sly-media-source-meta"><LockKeyhole size={14} /> Lecture et suivi locaux</span></footer>
       {subtitleError && <div className="sly-media-player-error sly-media-subtitle-error" role="alert"><span>{subtitleError}</span><button type="button" onClick={() => { setSubtitle(null); setSubtitleError(""); setSubtitleAttempt((value) => value + 1); }}>Réessayer</button></div>}
       {saveError && <div className="sly-media-player-error" role="alert">{saveError}</div>}
+      {castError && <div className="sly-media-player-error" role="alert">{castError}</div>}
     </div>
   </dialog>;
 }

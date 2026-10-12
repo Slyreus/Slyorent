@@ -104,6 +104,10 @@
 .sly-media-stage { position: relative; min-height: 180px; background: #01060a; }
 .sly-media-stage.video { aspect-ratio: 16 / 9; flex: 1 1 auto; container-type: inline-size; }
 .sly-media-stage.video video { width: 100%; height: 100%; display: block; object-fit: contain; }
+.sly-media-stage .sly-media-surface-toggle { position: absolute; z-index: 2; inset: 0 0 64px; display: grid; place-items: center; width: 100%; padding: 0; border: 0; border-radius: 0; background: transparent; color: #edf8ff; cursor: pointer; }
+.sly-media-surface-toggle > svg { padding: 10px; width: 72px; height: 72px; border-radius: 50%; background: #061421a6; filter: drop-shadow(0 2px 12px #0005); }
+.sly-media-stage .sly-media-surface-toggle:focus-visible { outline: 2px solid #49d2ff; outline-offset: -4px; }
+.sly-media-stage .sly-media-surface-toggle:disabled { opacity: 1; cursor: default; }
 .sly-media-stage.audio { min-height: 350px; display: grid; place-items: center; padding: 30px; background: radial-gradient(circle at 50% 35%, #114665, #061525 50%, #02080e); }
 .sly-media-audio-stage { width: min(680px, 100%); display: grid; justify-items: center; gap: 18px; color: #a4ddf1; }
 .sly-media-audio-stage h3 { margin: 0; color: #fff; }
@@ -193,19 +197,57 @@
 }
 @media (prefers-reduced-motion: reduce) { .sly-media-library *, .sly-media-library *::before, .sly-media-library *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition: none !important; } }
 
-.sly-cast-panel { margin: 16px 0; padding: 18px; background: linear-gradient(130deg, #0c2c40, #071725); border: 1px solid #1d7596; border-radius: 16px; }
+.sly-cast-panel { margin: 16px 0; padding: 16px; background: linear-gradient(130deg, #0c2c40, #071725); color: #eaf5fc; border: 1px solid #1d7596; border-radius: 14px; scroll-margin-top: 16px; }
+.sly-cast-panel:focus-visible { outline: 2px solid #49d2ff; outline-offset: 3px; }
+.sly-cast-panel.is-interrupted { border-color: #a66c40; }
 .sly-cast-title, .sly-cast-controls, .sly-cast-options { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.sly-cast-title > svg { color: #36c6ef; flex-shrink: 0; }
-.sly-cast-title > div { flex: 1; min-width: 160px; }
-.sly-cast-title strong, .sly-cast-title small { display: block; }
-.sly-cast-title small, .sly-cast-hint { color: #9ab7c8; font-size: 12px; margin-top: 6px; }
-.sly-cast-controls { margin: 16px 0; }
-.sly-cast-controls input { flex: 1; min-width: 130px; accent-color: #25c4ec; }
-.sly-cast-options label { display: flex; align-items: center; gap: 6px; font-size: 12px; }
-.sly-cast-options select { max-width: 210px; }
+.sly-cast-icon { flex: 0 0 42px; width: 42px; height: 42px; display: grid; place-items: center; border: 1px solid #38c8ee46; border-radius: 11px; background: #098aa72c; color: #45d2f4; }
+.sly-cast-title > div { flex: 1; min-width: 180px; }
+.sly-cast-eyebrow { color: #5dd6f5; font-size: 9px; font-weight: 750; letter-spacing: .06em; }
+.sly-cast-title h2 { margin: 4px 0; font-size: 14px; line-height: 1.45; }
+.sly-cast-title small { display: flex; align-items: center; gap: 5px; }
+.sly-cast-title small, .sly-cast-hint { color: #9ab7c8; font-size: 11px; margin-top: 5px; }
+.sly-cast-steps { display: flex; align-items: center; gap: 0; margin: 14px 0; padding: 0; list-style: none; }
+.sly-cast-steps li { display: flex; align-items: center; gap: 6px; color: #7395ac; font-size: 10px; }
+.sly-cast-steps li + li::before { content: ""; width: clamp(15px, 4vw, 55px); height: 1px; margin: 0 7px; background: #315368; }
+.sly-cast-steps li > span { width: 20px; height: 20px; display: grid; place-items: center; border: 1px solid #3b6077; border-radius: 50%; font-size: 9px; }
+.sly-cast-steps li[aria-current="step"] { color: #e2f8ff; }
+.sly-cast-steps li[aria-current="step"] > span { background: #058bae; border-color: #44cef0; color: white; }
+.sly-cast-steps li.is-done { color: #79d9c0; }
+.sly-cast-preparation { display: grid; gap: 6px; margin-bottom: 12px; font-size: 11px; color: #a3d3e4; }
+.sly-cast-preparation progress { width: 100%; height: 5px; accent-color: #25c4ec; }
+.sly-cast-controls { gap: 7px; margin: 12px 0; }
+.sly-cast-panel .sly-cast-controls > button { min-width: 34px; min-height: 34px; padding: 7px 9px; }
+.sly-cast-panel .sly-cast-play { border-color: #329dc2; background: #0a516e; }
+.sly-cast-timeline { flex: 1; min-width: 150px; display: flex; align-items: center; gap: 8px; margin: 0 5px; }
+.sly-cast-timeline input { flex: 1; min-width: 80px; width: 100%; accent-color: #25c4ec; }
+.sly-cast-timeline small { white-space: nowrap; color: #b5cedd; font-size: 10px; font-variant-numeric: tabular-nums; }
+.sly-cast-volume { display: flex; align-items: center; gap: 6px; color: #8ecfe5; }
+.sly-cast-volume input { width: 80px; accent-color: #25c4ec; }
+.sly-cast-volume small { min-width: 34px; color: #a3bccd; font-size: 10px; }
+.sly-cast-options { padding-top: 10px; border-top: 1px solid #ffffff13; }
+.sly-cast-options label { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #c1dbe8; }
+.sly-cast-options input { accent-color: #26c8ed; }
+.sly-cast-options select { max-width: 180px; }
+.sly-cast-queue { margin-top: 12px; border: 1px solid #31556a; border-radius: 9px; background: #05142077; }
+.sly-cast-queue summary { display: flex; align-items: center; gap: 7px; padding: 9px 11px; color: #b9ddec; font-size: 11px; list-style: none; cursor: pointer; }
+.sly-cast-queue summary > span { color: #83a5b8; font-size: 10px; }
+.sly-cast-queue summary > svg:last-child { margin-left: auto; }
+.sly-cast-queue[open] summary > svg:last-child { transform: rotate(180deg); }
+.sly-cast-queue ol { position: relative; max-height: 150px; margin: 0; padding: 0 5px 5px; overflow-y: auto; list-style: none; scrollbar-color: #32647d #091c2a; scrollbar-width: thin; }
+.sly-cast-panel .sly-cast-queue button { box-sizing: border-box; display: flex; justify-content: flex-start; width: 100%; gap: 9px; margin: 2px 0; padding: 7px; border-color: transparent; border-radius: 6px; background: transparent; text-align: left; }
+.sly-cast-queue button > span { flex: 0 0 22px; text-align: center; color: #8fc5dd; font-size: 10px; }
+.sly-cast-queue button > strong { flex: 1; min-width: 0; overflow: hidden; color: #c2dbea; font-size: 11px; font-weight: 500; white-space: nowrap; text-overflow: ellipsis; }
+.sly-cast-queue button > small { flex-shrink: 0; color: #81adbd; font-size: 9px; }
+.sly-cast-panel .sly-cast-queue [aria-current="true"] button { opacity: 1; background: #0a74933b; border-color: #42caed40; }
+.sly-cast-panel .sly-cast-queue button:hover:not(:disabled) { background: #12374e; }
+.sly-cast-selection { display: grid; gap: 7px; padding: 12px; margin: 14px 0; border-radius: 10px; border: 1px solid #355568; background: #061522; }
+.sly-cast-selection strong { font-size: 13px; }
+.sly-cast-selection small { font-size: 11px; color: #92b4c7; }
+.sly-cast-launching { display: flex; align-items: center; gap: 7px; }
 .sly-cast-pair { margin: 14px 0; padding: 8px 16px; border-radius: 12px; background: #06121f; font-size: 13px; overflow-wrap: anywhere; }
 .sly-cast-pair b { font-size: 22px; color: #43d3ff; letter-spacing: .12em; }
-.sly-cast-error { font-size: 13px; color: #ffac7a; }
+.sly-cast-error { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 12px 0; font-size: 12px; color: #ffac7a; }
 .sly-cast-dialog { width: min(510px, 90vw); max-height: 90vh; overflow: auto; padding: 22px; color: #e7f3fa; background: #081d2c; border: 1px solid #267a9b; border-radius: 18px; box-shadow: 0 20px 100px #0009; }
 .sly-cast-dialog::backdrop { background: #02080dcc; backdrop-filter: blur(6px); }
 .sly-cast-dialog header, .sly-cast-dialog h2, .sly-cast-dialog footer { display: flex; align-items: center; gap: 10px; }
@@ -220,3 +262,13 @@
 .sly-cast-dialog button.sly-media-primary { background: #0799bd; border-color: #2fccec; }
 .sly-cast-dialog select, .sly-cast-panel select { background: #0c2638; color: #edf7ff; padding: 9px; border: 1px solid #355467; border-radius: 8px; }
 .sly-cast-dialog footer { margin-top: 22px; }
+@media (max-width: 620px) {
+  .sly-cast-title { gap: 9px; }
+  .sly-cast-title > div { min-width: 140px; }
+  .sly-cast-title > button { margin-left: auto; }
+  .sly-cast-timeline { flex-basis: 100%; margin: 5px 0; }
+  .sly-cast-panel { padding: 12px; }
+  .sly-cast-panel .sly-cast-queue button { flex-wrap: wrap; }
+  .sly-cast-queue button > small { padding-left: 31px; width: 100%; }
+  .sly-cast-options { gap: 9px; }
+}

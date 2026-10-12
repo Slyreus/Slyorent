@@ -55,6 +55,44 @@ test("apparier un écran et limiter le relais aux capacités du lecteur", async 
 });
 
 const until = async (check) => { const start = Date.now(); while (!check()) { if (Date.now() - start > 3000) throw new Error("Session non prête"); await new Promise((resolve) => setTimeout(resolve, 5)); } };
+test("attendre le lecteur distant et suivre les commandes et la file", async () => {
+  const network = { id: "home", address: "192.168.1.10", netmask: "255.255.255.0" }, commands = [], loads = [];
+  let releaseLoad, releasePoll;
+  const pending = new Promise(resolve => { releaseLoad = resolve; });
+  const queue = Array.from({ length: 3 }, (_, fileIndex) => ({ id: 1, fileIndex, title: `Épisode ${fileIndex + 1}` }));
+  const service = new CastService({
+    networks: () => [network], discover: async () => [{ id: "tv", kind: "chromecast", name: "TV de test", network, seenAt: Date.now() }],
+    gateway: () => ({ start: async () => undefined, addMedia: () => ({ url: "local-media", resourceId: "token" }), remove: () => undefined, close: async () => undefined }),
+    client: () => ({ connect: async () => undefined, load: async (media, position) => { loads.push(media.title); if (loads.length === 1) await pending; return { playing: true, position, duration: 20 }; }, command: async (action, value) => { commands.push({ action, value }); }, status: () => new Promise(resolve => { releasePoll = resolve; }), stop: async () => undefined }),
+    service: { mediaPreparation: () => null, cancelMediaPreparation: () => undefined, mediaReference: async ({ fileIndex }) => ({ hash: "a".repeat(40), fileIndex }), openMedia: async ({ fileIndex }) => ({ url: String(fileIndex), duration: 20, mimeType: "video/mp4", audioTracks: [], subtitleTracks: [] }) },
+    vault: { release: () => undefined, renew: async () => undefined }, history: { update: async (_hash, _index, record) => record }, audit: { append: async () => undefined },
+  });
+  await service.discover();
+  try {
+    await service.start({ deviceId: "tv", queue, index: 1, position: 3, autoNext: false, subtitleTrack: null }, 7);
+    await until(() => service.status(7).phase === "loading");
+    assert.equal(service.status(7).loading, true); assert.equal(service.status(7).playing, false);
+    assert.deepEqual(service.status(7).queue, queue); assert.equal(service.status(8).queue, undefined);
+    await assert.rejects(service.control({ action: "play" }, 7), /préparation/u);
+    releaseLoad(); await until(() => !service.status(7).loading);
+    assert.equal(service.status(7).playing, true); assert.equal(service.status(7).position, 3);
+    await service.control({ action: "pause" }, 7); assert.equal(service.status(7).playing, false);
+    await service.control({ action: "volume", value: .25 }, 7); assert.equal(service.status(7).volume, .25);
+    await assert.rejects(service.control({ action: "volume", value: 2 }, 7));
+    await assert.rejects(service.control({ action: "episode", value: 1.5 }, 7));
+    await assert.rejects(service.control({ action: "episode", value: 3 }, 7));
+    await assert.rejects(service.control({ action: "episode", value: 0 }, 8));
+    await service.control({ action: "episode", value: 2 }, 7);
+    await until(() => service.status(7).index === 2 && !service.status(7).loading);
+    assert.equal(service.status(7).item.title, "Épisode 3"); assert.equal(service.status(7).position, 0);
+    assert.deepEqual(loads, ["Épisode 2", "Épisode 3"]); assert.ok(commands.some(command => command.action === "pause"));
+    await until(() => Boolean(releasePoll));
+    await service.control({ action: "pause" }, 7);
+    releasePoll({ playing: true, position: 0 });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(service.status(7).playing, false, "Un ancien état de l’appareil annule la pause");
+  } finally { releaseLoad(); releasePoll?.({ playing: false, position: 0 }); await service.close(); }
+});
 test("enchaîner une seule fois, conserver le suivi et fermer la session", async () => {
   const network = { id: "home", address: "192.168.1.10", netmask: "255.255.255.0" };
   const records = [], accesses = [], revoked = []; let receiver, closed = false;

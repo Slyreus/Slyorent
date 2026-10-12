@@ -1,4 +1,5 @@
 import { createRoot } from "react-dom/client";
+import "../../app/globals.css";
 import { MediaLibraryView, type MediaBridge } from "../../app/components/MediaLibrary";
 
 declare global { interface Window { mediaTest: { invoke: (method: string, params?: object) => Promise<unknown> } } }
@@ -59,6 +60,10 @@ async function run() {
   await until(() => (currentVideo()?.currentTime || 0) > .2, "Démarrage vidéo impossible");
   let video = currentVideo()!;
   assert(!video.muted, "Audio coupé par défaut");
+  click(".sly-media-surface-toggle");
+  await until(() => Boolean(currentVideo()?.paused), "Le clic sur l’image ne met pas la vidéo en pause");
+  click(".sly-media-surface-toggle");
+  await until(() => currentVideo()?.paused === false, "Le clic sur l’image ne relance pas la vidéo");
   await until(() => subtitleText()?.includes("français") === true, "Les sous-titres français ne s'affichent pas automatiquement");
   await until(() => document.querySelector(".sly-media-caption-line")?.textContent?.includes("français") === true, "Sous-titres absents de l'affichage arrondi");
   assert(currentVideo()?.textTracks[0]?.mode === "hidden", "Le rendu natif ne doit pas doubler les sous-titres");
@@ -126,7 +131,7 @@ async function run() {
   window.dispatchEvent(new Event("focus"));
   await until(() => Boolean(currentVideo() && currentVideo()!.src !== oldUrl && currentVideo()!.readyState >= 2), "Accès expiré non remplacé");
   video = currentVideo()!;
-  assert(Math.abs(video.currentTime - savedTime) < .5, "Position perdue après expiration");
+  await until(() => !video.seeking && Math.abs(video.currentTime - savedTime) < .5, `Position perdue après expiration : ${video.currentTime} au lieu de ${savedTime}`);
   assert(video.paused, "Lecture relancée sans demande après la pause");
   assert(Math.abs(video.volume - .36) < .01, "Volume perdu après récupération");
   await video.play();
@@ -159,12 +164,55 @@ async function run() {
   [...document.querySelectorAll<HTMLButtonElement>(".sly-media-filter-tabs button")].find((item) => item.textContent === "Tout")!.click();
   await until(() => Boolean(document.querySelector(firstButton)), "Liste absente"); click(firstButton);
   await until(() => Boolean(document.querySelector("[data-player-cast]:not(:disabled)")), "Bouton Caster indisponible");
+  const nativeFullscreen = await invoke("fullscreen");
+  if (!nativeFullscreen) {
+    document.querySelector<HTMLElement>(".sly-media-player")!.requestFullscreen = async () => { throw new Error("Plein écran indisponible dans le test"); };
+    click("[aria-label='Activer le plein écran']");
+    await until(() => Boolean(document.querySelector(".is-fallback-fullscreen")), "Plein écran de secours absent");
+  }
   click("[data-player-cast]");
   await until(() => Boolean(document.querySelector("#sly-cast-device option[value='tv-test']")), "Découverte des appareils absente");
+  assert(!document.fullscreenElement && !document.querySelector(".is-fallback-fullscreen"), "La sélection de cast doit quitter le plein écran du lecteur");
+  const castingDialog = document.querySelector<HTMLDialogElement>(".sly-cast-dialog")!, castingRect = castingDialog.getBoundingClientRect();
+  assert(castingDialog.matches(":modal") && document.elementFromPoint(castingRect.x + castingRect.width / 2, castingRect.y + castingRect.height / 2)?.closest("dialog") === castingDialog, "La sélection de cast reste masquée par le lecteur");
   assert(document.querySelector<HTMLInputElement>(".sly-cast-check input")?.checked, "Enchaînement automatique désactivé par défaut");
   click(".sly-cast-dialog footer .sly-media-primary");
+  await until(() => Boolean(document.querySelector(".sly-cast-launching")), "Aucun retour visuel pendant la connexion au cast");
   await until(() => Boolean(document.querySelector(".sly-cast-panel")) && !currentVideo(), "La lecture locale doit céder la place au cast");
   assert(document.querySelector(".sly-cast-panel")?.textContent?.includes("TV de test"), "Appareil sélectionné absent");
+  await until(() => document.activeElement?.classList.contains("sly-cast-panel") === true, "Le suivi du cast n’est pas mis en évidence");
+  assert(document.querySelector<HTMLProgressElement>(".sly-cast-preparation progress")?.value === 42, "Progression de préparation du cast absente");
+  assert(document.querySelectorAll(".sly-cast-queue li").length === 4, "File d’épisodes du cast absente");
+  await invoke("capture", { name: "player-cast-preparing" });
+  await until(() => Boolean(document.querySelector("[aria-label='Mettre le cast en pause']:not(:disabled)")), "Lecture distante non prête");
+  const castPanel = document.querySelector<HTMLElement>(".sly-cast-panel")!;
+  assert(getComputedStyle(castPanel).color === "rgb(234, 245, 252)", "Le texte du cast reste sombre sur fond sombre");
+  await invoke("capture", { name: "player-cast-playing" });
+  click("[aria-label='Mettre le cast en pause']");
+  await until(() => Boolean(document.querySelector("[aria-label='Reprendre le cast']:not(:disabled)")), "Pause distante non suivie");
+  click("[aria-label='Reprendre le cast']");
+  await until(() => Boolean(document.querySelector("[aria-label='Mettre le cast en pause']:not(:disabled)")), "Reprise distante non suivie");
+  const seek = document.querySelector<HTMLInputElement>("[aria-label='Position sur l’appareil']")!;
+  seek.value = "500"; seek.dispatchEvent(new KeyboardEvent("keyup", { key: "ArrowRight", bubbles: true }));
+  await until(() => document.querySelector(".sly-cast-timeline small")?.textContent?.includes("0:30") === true, "Position distante non actualisée");
+  const volume = document.querySelector<HTMLInputElement>("[aria-label='Volume sur l’appareil']")!;
+  volume.value = "25"; volume.dispatchEvent(new KeyboardEvent("keyup", { key: "ArrowLeft", bubbles: true }));
+  await until(() => document.querySelector(".sly-cast-volume small")?.textContent === "25 %", "Volume distant non actualisé");
+  click(".sly-cast-queue li:nth-child(3) button");
+  await until(() => document.querySelector(".sly-cast-queue li:nth-child(3)")?.getAttribute("aria-current") === "true", "Sélection d’épisode distante non suivie");
+  await invoke("resize", { small: true });
+  await sleep(120);
+  assert(castPanel.scrollWidth <= castPanel.clientWidth, "Le suivi du cast déborde de la petite fenêtre");
+  const castQueue = document.querySelector<HTMLOListElement>(".sly-cast-queue ol")!;
+  assert(castQueue.scrollWidth <= castQueue.clientWidth, "La file d’épisodes crée un défilement horizontal");
+  await invoke("capture", { name: "player-cast-small" });
+  await invoke("resize");
+  await invoke("castFailure");
+  await until(() => castPanel.textContent?.includes("Appareil de test déconnecté.") === true, "L’erreur de connexion masque le suivi du cast");
+  await invoke("capture", { name: "player-cast-error" });
+  const retry = [...castPanel.querySelectorAll<HTMLButtonElement>("button")].find(item => item.textContent?.includes("Réessayer"))!;
+  retry.click();
+  await until(() => Boolean(document.querySelector("[aria-label='Mettre le cast en pause']:not(:disabled)")), "Reconnexion au cast impossible");
   const stop = [...document.querySelectorAll<HTMLButtonElement>(".sly-cast-panel button")].find((item) => item.textContent?.includes("Arrêter le cast"))!; stop.click();
   await until(() => !document.querySelector(".sly-cast-panel"), "Cast non arrêté");
   root.unmount();

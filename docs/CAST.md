@@ -1,10 +1,12 @@
 # Cast
 
-Ouvre une vidéo, puis clique sur Caster dans la barre du lecteur. Choisis un appareil ou le mode navigateur. Slyorrent prépare une copie compatible si nécessaire et conserve l’original.
+Ouvre une vidéo, puis clique sur Caster dans la barre du lecteur. Le plein écran se ferme pour afficher le choix de l’appareil. Choisis un appareil ou le mode navigateur. Slyorrent prépare une copie compatible si nécessaire et conserve l’original.
 
 Avec le mode navigateur, ouvre l’adresse affichée sur l’autre écran et saisis le code du PC. Il expire après deux minutes et ne peut servir qu’une fois. Certains navigateurs demandent d’appuyer sur Lire au premier démarrage.
 
-Pendant le cast, les commandes sont dans la médiathèque : pause, reprise, déplacement, épisode précédent ou suivant, audio et sous-titres. L’option Épisode suivant automatique prépare le prochain fichier et le lance à la fin. La position de lecture reste enregistrée sur le PC, comme avec le lecteur local. L’enchaînement s’arrête si le prochain fichier n’est plus validé ou si l’appareil se déconnecte.
+Pendant le cast, une vue de suivi affiche l’appareil, la préparation, l’épisode et sa position. Les commandes restent sur le PC : pause, reprise, déplacement, volume si disponible, audio et sous-titres. La file de lecture indique l’épisode en cours et ceux qui suivent ; tu peux en choisir un directement. Elle reste accessible en revenant dans la médiathèque.
+
+L’option Épisode suivant automatique prépare le prochain fichier et le lance à la fin. La position de lecture reste enregistrée sur le PC, comme avec le lecteur local. L’enchaînement s’arrête si le prochain fichier n’est plus validé ou si l’appareil se déconnecte. En cas d’erreur, la vue garde le dernier épisode et propose de réessayer. La file est limitée à 250 fichiers, autour de l’épisode choisi.
 
 Google Cast utilise le récepteur média standard. DLNA repose sur AVTransport ; selon la TV, les sous-titres séparés et le déplacement dans la vidéo peuvent être refusés. Un navigateur récent peut servir de lecteur sur une tablette, un téléphone ou un autre ordinateur. Les vidéos sont préparées en MP4 H.264/AAC, avec une conversion limitée à 1080p si nécessaire. La compatibilité de chaque modèle doit être vérifiée sur l’appareil. AirPlay et Miracast ne sont pas inclus.
 

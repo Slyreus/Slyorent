@@ -109,9 +109,9 @@ export function MediaLibraryView({ torrents, bridge, initialQuery = "", onQueryC
     if (!sessionRef.current) sessionRef.current = new MediaPlaybackSession(getBridge());
     setSelected({ episode, record: history[episode.watchKey], session: sessionRef.current });
   }
-  function closePlayer() {
+  function closePlayer(restoreFocus = true) {
     setSelected(null); sessionRef.current?.dispose(); sessionRef.current = null;
-    window.requestAnimationFrame(() => returnFocusRef.current?.focus());
+    if (restoreFocus) window.requestAnimationFrame(() => returnFocusRef.current?.focus());
   }
   function leaveDetail() {
     const key = detailKey;
@@ -158,7 +158,7 @@ export function MediaLibraryView({ torrents, bridge, initialQuery = "", onQueryC
   };
 
   return <section className={`sly-media-library sly-catalog ${className}`.trim()} data-testid="media-library" aria-labelledby="sly-media-library-title">
-    <CastPanel getBridge={getBridge} request={castRequest} onDismiss={() => setCastRequest(null)} onStarted={closePlayer} onProgress={updateProgress} />
+    <CastPanel getBridge={getBridge} request={castRequest} onDismiss={() => setCastRequest(null)} onStarted={() => closePlayer(false)} onProgress={updateProgress} />
     <header className="sly-catalog-heading"><div><span className="sly-media-eyebrow"><Library size={13} /> BIBLIOTHÈQUE LOCALE</span><h1 id="sly-media-library-title">Médiathèque<span>{allTitles.length} titres</span></h1><p>{allEpisodes.length} fichiers <span>·</span> {readyCount} prêts à lire</p></div><div className="sly-media-folder-tools"><button type="button" disabled={Boolean(busy)} title={downloadDirectory} onClick={() => void runAction("open", () => getBridge().openDownloadDirectory())}><FolderOpen size={16} /> Bibliothèque</button><button type="button" disabled={Boolean(busy)} aria-label="Changer le dossier de bibliothèque" title="Changer le dossier" onClick={() => void runAction("choose", async () => { if (!(await getBridge().chooseDownloadDirectory()).canceled) onDirectoryChanged?.(); })}><FolderCog size={16} /></button></div></header>
     <nav className="sly-catalog-categories" aria-label="Types de médias">{(["all", "series", "movie", "audio"] as const).map((value) => { const Icon = value === "series" ? Tv : value === "movie" ? Film : value === "audio" ? Music2 : Library; return <button type="button" key={value} aria-pressed={filters.category === value && !filters.favoritesOnly} onClick={() => { setDetailKey(null); changeFilters({ category: value, favoritesOnly: false, torrent: "", season: "" }); }}><Icon size={16} />{value === "all" ? "Tout" : CATEGORY_LABELS[value]}<span>{value === "all" ? allTitles.length : allTitles.filter((item) => item.category === value).length}</span></button>; })}<button type="button" className="sly-catalog-favorites" aria-pressed={filters.favoritesOnly} onClick={() => { setDetailKey(null); changeFilters({ favoritesOnly: !filters.favoritesOnly, category: "all", torrent: "", season: "" }); }}><Star size={16} /> Favoris<span>{allTitles.filter((item) => preferences.favorites.includes(item.key)).length}</span></button></nav>
     {error && <div className="sly-media-alert" role="alert"><LockKeyhole size={16} />{error}<button type="button" onClick={() => setError("")} aria-label="Fermer l’alerte"><X size={14} /></button></div>}
@@ -175,7 +175,7 @@ export function MediaLibraryView({ torrents, bridge, initialQuery = "", onQueryC
     {itemCount > limit && <button className="sly-media-load-more" type="button" onClick={() => setLimit((value) => value + PAGE_SIZE)}>Afficher la suite · {itemCount - limit}</button>}
     {itemCount === 0 && <div className="sly-media-empty"><Search size={28} /><h2>{allEpisodes.length ? "Aucun résultat" : "La médiathèque est vide"}</h2><p>{allEpisodes.length ? "Aucun fichier ne correspond à ces filtres." : "Les médias de vos torrents apparaîtront ici."}</p>{activeFilterCount > 0 && <button type="button" className="sly-media-load-more" onClick={resetFilters}>Effacer les filtres</button>}{detailKey && !detail && <button type="button" onClick={leaveDetail}>Revenir à la bibliothèque</button>}</div>}
     {library.length > 0 && <details className="sly-media-manage sly-catalog-manage"><summary><FolderCog size={16} /> Dossiers et vérifications <span>{scopedTorrents.length}</span><ChevronDown size={14} /></summary><div>{scopedTorrents.map(renderTools)}</div></details>}
-    {selected && <MediaPlayer key={selected.episode.key} episode={selected.episode} initialRecord={selected.record} session={selected.session} getBridge={getBridge} previous={playlist[playlistIndex - 1]} next={playlist[playlistIndex + 1]} onSelect={play} onClose={closePlayer} onProgress={updateProgress} onCast={(options) => { const videos = playlist.filter((item) => item.kind === "video").slice(0, 250); setCastRequest({ ...options, queue: videos.map((item) => ({ id: item.torrentId, fileIndex: item.fileIndex, title: `${item.seriesTitle} · ${item.episodeTitle}` })), index: videos.findIndex((item) => item.key === selected.episode.key) }); }} />}
+    {selected && <MediaPlayer key={selected.episode.key} episode={selected.episode} initialRecord={selected.record} session={selected.session} getBridge={getBridge} previous={playlist[playlistIndex - 1]} next={playlist[playlistIndex + 1]} onSelect={play} onClose={closePlayer} onProgress={updateProgress} onCast={(options) => { const videos = playlist.filter((item) => item.kind === "video"); const index = videos.findIndex((item) => item.key === selected.episode.key); if (index < 0) throw new Error("File de lecture indisponible."); const offset = Math.max(0, index - 25); setCastRequest({ ...options, queue: videos.slice(offset, offset + 250).map((item) => ({ id: item.torrentId, fileIndex: item.fileIndex, title: `${item.seriesTitle} · ${episodeLabel(item)} · ${item.episodeTitle}` })), index: index - offset }); }} />}
   </section>;
 }
 export function episodeLabel(episode: MediaEpisode) {

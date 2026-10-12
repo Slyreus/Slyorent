@@ -15,7 +15,7 @@ video.addEventListener("error", () => { document.querySelector("#status").textCo
 async function report(failed = false) {
   if (!token || !epoch || reporting || video.readyState < 1 && !failed) return;
   reporting = true;
-  try { await api("/api/report", { epoch, version, position: video.currentTime || 0, duration: Number.isFinite(video.duration) ? video.duration : 0, playing: !video.paused && !video.ended, ended, failed }); }
+  try { await api("/api/report", { epoch, version, position: video.currentTime || 0, duration: Number.isFinite(video.duration) ? video.duration : 0, volume: video.volume, playing: !video.paused && !video.ended, ended, failed }); }
   catch { video.pause(); document.querySelector("#status").textContent = "Cast arrêté ou connexion perdue."; }
   finally { reporting = false; }
 }
