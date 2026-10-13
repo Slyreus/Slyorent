@@ -3,8 +3,8 @@ import http from "node:http";
 import test from "node:test";
 import { CastGateway } from "../electron/cast-gateway.mjs";
 import { CastService, castQueue } from "../electron/cast-service.mjs";
-import { castNetworks, dnsRecords, localDeviceUrl, privateAddress, rendererDescription, sameNetwork } from "../electron/cast-network.mjs";
-import { decodeCastMessage, encodeCastMessage } from "../electron/cast-clients.mjs";
+import { castDeviceId, castNetworks, dnsRecords, localDeviceUrl, privateAddress, rendererDescription, sameNetwork } from "../electron/cast-network.mjs";
+import { decodeCastMessage, encodeCastMessage, googleCastMediaStatus } from "../electron/cast-clients.mjs";
 import { analyzeProbe, conversionVideoArgs } from "../electron/media-profile.mjs";
 
 test("borner le réseau, les descriptions et les messages Cast", () => {
@@ -25,6 +25,13 @@ test("borner le réseau, les descriptions et les messages Cast", () => {
   assert.deepEqual(decodeCastMessage(frame.subarray(4)).payload, { type: "LOAD", requestId: 1 });
   assert.throws(() => decodeCastMessage(Buffer.from([50, 255, 255, 255, 255, 255])));
   assert.throws(() => castQueue([{ id: 1, fileIndex: 0 }, { id: 1, fileIndex: 0 }]));
+  assert.equal(castDeviceId("chromecast", "192.168.1.20", { id: "home" }), castDeviceId("chromecast", "192.168.1.20", { id: "home" }));
+  assert.notEqual(castDeviceId("chromecast", "192.168.1.20", { id: "home" }), castDeviceId("dlna", "192.168.1.20", { id: "home" }));
+  const awaiting = googleCastMediaStatus({ playerState: "IDLE" });
+  assert.equal(awaiting.stopped, false); assert.equal(awaiting.awaitingMedia, true);
+  assert.equal(googleCastMediaStatus({ playerState: "IDLE", idleReason: "FINISHED" }).ended, true);
+  assert.equal(googleCastMediaStatus({ playerState: "PLAYING", volume: { level: .4 } }).volume, .4);
+  assert.throws(() => googleCastMediaStatus({ playerState: "IDLE", idleReason: "ERROR" }), { code: "CAST_MEDIA_ERROR" });
   const analysis = analyzeProbe({ format: { duration: 60 }, streams: [{ index: 0, codec_type: "video", codec_name: "hevc", width: 3840, height: 2160 }] }, { cast: true });
   assert.equal(analysis.videoAdapted, true); assert.ok(conversionVideoArgs(analysis, "libx264", 2).includes("4.1"));
 });
@@ -48,10 +55,45 @@ test("apparier un écran et limiter le relais aux capacités du lecteur", async 
     assert.equal((await send(`${origin}/api/state`, { method: "POST", headers: { Origin: "http://evil.test", Authorization: `Bearer ${token}` }, body: "{}" })).status, 403);
     assert.equal((await send(`${origin}/api/state`, { method: "POST", headers: { Origin: origin, Authorization: `Bearer ${token}` }, body: "{}" })).status, 200);
     assert.equal((await send(media.url, { headers: { Range: "bytes=0-2" } })).body, "abc"); assert.equal(calls, 1);
+    assert.deepEqual(gateway.delivery(media.resourceId), { requests: 1, accepted: 1, lastStatus: 206 });
     assert.equal((await send(media.subtitleUrl)).headers["content-type"], "text/vtt; charset=utf-8");
     released = true; assert.equal((await send(media.url)).status, 400);
   } finally { await gateway.close(); }
   await assert.rejects(send(gateway.receiverUrl));
+});
+
+test("conserver l’épisode et le motif après un arrêt de la TV", async () => {
+  for (const idleReason of ["ERROR", "CANCELLED"]) {
+    const network = { id: "home", address: "192.168.1.10", netmask: "255.255.255.0" }, events = [];
+    let releaseClose;
+    const closing = new Promise(resolve => { releaseClose = resolve; });
+    const queue = [{ id: 1, fileIndex: 0, title: "Épisode 1" }];
+    const service = new CastService({
+      networks: () => [network], discover: async () => [{ id: "tv", kind: "chromecast", name: "TV de test", network, seenAt: Date.now() }],
+      gateway: () => ({ start: async () => undefined, addMedia: () => ({ url: "local-media", resourceId: "token" }), delivery: () => ({ requests: 0, accepted: 0, lastStatus: null }), remove: () => undefined, close: () => closing }),
+      client: () => ({ connect: async () => undefined, load: async () => googleCastMediaStatus({ playerState: "IDLE", idleReason }), stop: async () => undefined }),
+      service: { mediaPreparation: () => null, cancelMediaPreparation: () => undefined, mediaReference: async ({ fileIndex }) => ({ hash: "a".repeat(40), fileIndex }), openMedia: async () => ({ url: "local-capability", duration: 20, mimeType: "video/mp4", audioTracks: [], subtitleTracks: [] }) },
+      vault: { release: () => undefined, renew: async () => undefined },
+      history: { update: async (_hash, _index, record) => record }, audit: { append: async (event, details) => { events.push({ event, details }); } },
+    });
+    try {
+      await service.discover();
+      await service.start({ deviceId: "tv", queue, index: 0, position: 8, autoNext: false }, 7);
+      await until(() => service.status(7).active === false);
+      const failed = service.status(7);
+      assert.equal(failed.item.title, "Épisode 1"); assert.deepEqual(failed.queue, queue);
+      assert.equal(failed.position, 8); assert.equal(failed.deviceName, "TV de test"); assert.equal(failed.loading, false);
+      assert.ok(failed.error); assert.equal(service.status(8).item, undefined);
+      if (idleReason === "ERROR") assert.match(failed.error, /Aucune demande vidéo/u);
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(service.status(7).error, failed.error, "Le suivi disparaît pendant la fermeture du relais");
+      releaseClose();
+      await until(() => events.some(item => item.event === "cast.failed"));
+      assert.equal(events.find(item => item.event === "cast.stopped").details.reason, idleReason === "ERROR" ? "CAST_MEDIA_ERROR" : "CAST_REMOTE_STOPPED");
+      await service.control({ action: "stop" }, 7);
+      assert.deepEqual(service.status(7), { active: false });
+    } finally { releaseClose(); await service.close(); }
+  }
 });
 
 const until = async (check) => { const start = Date.now(); while (!check()) { if (Date.now() - start > 3000) throw new Error("Session non prête"); await new Promise((resolve) => setTimeout(resolve, 5)); } };

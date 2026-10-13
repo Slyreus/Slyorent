@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import dgram from "node:dgram";
 import http from "node:http";
 import { isIP } from "node:net";
@@ -7,6 +7,7 @@ import { networkInterfaces } from "node:os";
 export const castError = (message, code = "CAST_FAILED") => Object.assign(new Error(message), { code });
 export const safeText = (value, limit = 160) => String(value || "").replace(/[\u0000-\u001f\u007f]/gu, " ").trim().slice(0, limit);
 export const normalizedAddress = (value) => String(value || "").replace(/^::ffff:/iu, "");
+export const castDeviceId = (kind, address, network) => createHash("sha256").update(`${kind}:${network.id}:${address}`).digest("hex").slice(0, 32);
 const ipv4Number = (address) => address.split(".").reduce((value, part) => (value * 256 + Number(part)) >>> 0, 0);
 
 export function privateAddress(address) {
@@ -141,13 +142,13 @@ export async function discoverCastDevices(networks = castNetworks(), signal) {
         const key = `dlna:${remote.address}`;
         if (devices.has(key)) return;
         devices.set(key, null);
-        descriptions.push(localHttp(url, network, { signal }).then((xml) => { const device = rendererDescription(xml, url, network); if (device) devices.set(key, { ...device, id: randomUUID(), kind: "dlna", address: remote.address, network, seenAt: Date.now() }); }).catch(() => undefined));
+        descriptions.push(localHttp(url, network, { signal }).then((xml) => { const device = rendererDescription(xml, url, network); if (device) devices.set(key, { ...device, id: castDeviceId("dlna", remote.address, network), kind: "dlna", address: remote.address, network, seenAt: Date.now() }); }).catch(() => undefined));
       } else {
         const records = dnsRecords(message);
         for (const record of records) {
           if (record.type !== 33 || record.port !== 8009 || !record.name.endsWith("._googlecast._tcp.local") || !records.some((item) => item.type === 1 && item.name === record.target && item.address === remote.address)) continue;
           const txt = records.find((item) => item.type === 16 && item.name === record.name)?.txt || {};
-          devices.set(`cast:${remote.address}`, { id: randomUUID(), kind: "chromecast", address: remote.address, network, name: safeText(txt.fn) || "Google Cast", model: safeText(txt.md, 100), seenAt: Date.now() });
+          devices.set(`cast:${remote.address}`, { id: castDeviceId("chromecast", remote.address, network), kind: "chromecast", address: remote.address, network, name: safeText(txt.fn) || "Google Cast", model: safeText(txt.md, 100), seenAt: Date.now() });
         }
       }
     });

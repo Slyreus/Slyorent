@@ -1,11 +1,9 @@
-Les sous-titres intégrés sont disponibles dans le lecteur, avec le choix de la langue. En VO, le français s’active par défaut lorsqu’il est présent. Le texte s’affiche sans italique, sur un fond arrondi.
+Le suivi du cast reste ouvert quand la TV arrête la lecture ou refuse la vidéo. L’épisode, la position et la file restent visibles, avec le motif de l’arrêt et un bouton Réessayer.
 
-Pour les fichiers avec plusieurs pistes audio, le menu Audio permet de choisir la langue. Le changement garde la position, le volume, la vitesse et l’état de pause. Une vidéo déjà convertie est réutilisée.
+Le chargement sur Google Cast n’est plus pris pour un arrêt. La connexion attend le démarrage du lecteur ; si la vidéo ne part pas, le message reste affiché. Réessayer retrouve le même appareil après une nouvelle recherche.
 
-Audio, Sous-titres, Précédent et Suivant sont sur la même barre. Le lecteur prend moins de place autour de la vidéo.
+Le journal conserve le motif du refus et indique si le PC a reçu une demande de vidéo. Les liens du flux et les clés d’accès n’y figurent pas.
 
-Les pistes texte ASS, SSA, SRT, WebVTT et mov_text sont prises en charge. Les sous-titres sous forme d’images et les fichiers séparés ne le sont pas encore.
-
-Pour la mise à jour, ferme Slyorrent et lance `Slyorrent-Setup-1.1.5.exe`. Les torrents, les réglages et le suivi restent en place. FFmpeg, FFprobe et Transmission sont inclus dans le setup.
+Pour la mise à jour, ferme Slyorrent et lance `Slyorrent-Setup-1.1.9.exe`. Les torrents, les réglages et le suivi restent en place. FFmpeg, FFprobe et Transmission sont inclus dans le setup.
 
 L’installateur n’est pas encore signé : Windows peut afficher « éditeur inconnu ». Les empreintes sont dans `SHA256SUMS.txt`. Les archives de sources jointes ne sont pas nécessaires à l’installation.

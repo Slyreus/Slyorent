@@ -27,10 +27,11 @@ export class CastGateway {
     this.#address = `http://${this.#network.address}:${server.address().port}`;
   }
   addMedia(access, vtt) {
-    const id = secret(); this.#resources.set(id, { access, vtt });
+    const id = secret(); this.#resources.set(id, { access, vtt, requests: 0, accepted: 0, lastStatus: null });
     return { url: `${this.#address}/m/${id}`, subtitleUrl: vtt ? `${this.#address}/s/${id}` : undefined, srtUrl: vtt ? `${this.#address}/t/${id}` : undefined, resourceId: id };
   }
   remove(id) { this.#resources.delete(id); }
+  delivery(id) { const item = this.#resources.get(id); return item ? { requests: item.requests, accepted: item.accepted, lastStatus: item.lastStatus } : null; }
   #json(response, status, value) { response.writeHead(status, { "Content-Type": "application/json; charset=utf-8" }); response.end(JSON.stringify(value)); }
   async #body(request) { let size = 0; const chunks = []; for await (const chunk of request) { size += chunk.length; if (size > 8192) throw castError("Requête trop volumineuse."); chunks.push(chunk); } return JSON.parse(Buffer.concat(chunks).toString("utf8")); }
   #authorize(request) { return this.#bearer && equal(request.headers.authorization, `Bearer ${this.#bearer}`) && request.headers.origin === this.#address; }
@@ -51,7 +52,9 @@ export class CastGateway {
       if (request.method === "OPTIONS") { response.writeHead(204); response.end(); return; }
       if (!["GET", "HEAD"].includes(request.method)) { this.#json(response, 405, {}); return; }
       const item = this.#resources.get(match[2]); if (!item) { this.#json(response, 404, {}); return; }
-      await this.#vault.renew(item.access.url, this.#owner);
+      if (match[1] === "m" && request.method === "GET") item.requests++;
+      try { await this.#vault.renew(item.access.url, this.#owner); }
+      catch (error) { if (match[1] === "m") item.lastStatus = 400; throw error; }
       if (match[1] !== "m") {
         if (!item.vtt) { this.#json(response, 404, {}); return; }
         const body = Buffer.from(match[1] === "s" ? item.vtt : item.vtt.replace(/^WEBVTT[^\n]*\n/u, "").replace(/(\d{2}:\d{2}:\d{2})\.(\d{3})/gu, "$1,$2"));
@@ -59,6 +62,8 @@ export class CastGateway {
       }
       const controller = new AbortController(); request.once("aborted", () => controller.abort()); response.once("close", () => { if (!response.writableEnded) controller.abort(); });
       const served = await this.#vault.handle({ url: item.access.url, method: request.method, headers: new Headers({ ...(request.headers.range ? { Range: request.headers.range } : {}) }), signal: controller.signal, webContentsId: this.#owner });
+      item.lastStatus = served.status;
+      if (request.method === "GET" && [200, 206].includes(served.status)) item.accepted++;
       for (const header of ["content-type", "content-length", "content-range", "accept-ranges"]) if (served.headers.has(header)) response.setHeader(header, served.headers.get(header));
       response.writeHead(served.status);
       if (served.body && request.method !== "HEAD") await pipeline(Readable.fromWeb(served.body), response); else response.end();

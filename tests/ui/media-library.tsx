@@ -214,6 +214,12 @@ async function run() {
   const retry = [...castPanel.querySelectorAll<HTMLButtonElement>("button")].find(item => item.textContent?.includes("Réessayer"))!;
   retry.click();
   await until(() => Boolean(document.querySelector("[aria-label='Mettre le cast en pause']:not(:disabled)")), "Reconnexion au cast impossible");
+  await invoke("castSilentStop");
+  await until(() => document.querySelector(".sly-cast-panel")?.textContent?.includes("Cast arrêté sur l’appareil.") === true, "L’arrêt sans motif masque le suivi du cast");
+  await sleep(2200);
+  assert(document.querySelector(".sly-cast-panel")?.textContent?.includes("Cast arrêté sur l’appareil."), "Le suivi disparaît au rafraîchissement suivant");
+  [...document.querySelectorAll<HTMLButtonElement>(".sly-cast-panel button")].find(item => item.textContent?.includes("Réessayer"))!.click();
+  await until(() => Boolean(document.querySelector("[aria-label='Mettre le cast en pause']:not(:disabled)")), "Reprise après un arrêt sans motif impossible");
   const stop = [...document.querySelectorAll<HTMLButtonElement>(".sly-cast-panel button")].find((item) => item.textContent?.includes("Arrêter le cast"))!; stop.click();
   await until(() => !document.querySelector(".sly-cast-panel"), "Cast non arrêté");
   root.unmount();

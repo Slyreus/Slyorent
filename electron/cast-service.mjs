@@ -16,7 +16,7 @@ export function castQueue(value) {
 
 /** Une session, un appareil, deux médias au maximum. Aucun catalogue réseau. */
 export class CastService {
-  #service; #vault; #history; #audit; #sleep; #session; #devices = new Map(); #networks = new Map(); #discovery; #discovering; #lastError = ""; #environment;
+  #service; #vault; #history; #audit; #sleep; #session; #devices = new Map(); #networks = new Map(); #discovery; #discovering; #terminal; #environment;
   constructor({ service, vault, history, audit, sleep = () => undefined, networks = castNetworks, discover = discoverCastDevices, gateway = (options) => new CastGateway(options), client = (device) => device.kind === "chromecast" ? new GoogleCastClient(device) : new DlnaCastClient(device) }) { this.#service = service; this.#vault = vault; this.#history = history; this.#audit = audit; this.#sleep = sleep; this.#environment = { networks, discover, gateway, client }; }
   async discover() {
     if (this.#discovering) return this.#discovering;
@@ -30,7 +30,7 @@ export class CastService {
   }
   status(owner) {
     const s = this.#session;
-    if (!s || s.owner !== owner) return { active: false, error: this.#lastError };
+    if (!s || s.owner !== owner) return this.#terminal?.owner === owner ? this.#terminal.status : { active: false };
     const item = s.queue[s.index];
     return { active: true, kind: s.kind, deviceName: s.deviceName, item, queue: s.queue, index: s.index, total: s.queue.length, phase: s.phase, nextPrepared: Boolean(s.prepared.get(s.index + 1)?.ready), loading: s.loading, playing: s.playing, buffering: s.buffering, position: s.position, duration: s.duration, volume: s.volume, volumeSupported: s.volumeSupported, autoNext: s.autoNext, error: s.error, preparation: s.primary ? this.#service.mediaPreparation(s.primary, owner) : null, receiverUrl: s.kind === "browser" ? s.gateway.receiverUrl : undefined, pairingCode: s.gateway.code || undefined, paired: s.kind !== "browser" || s.gateway.paired, audioTracks: s.current?.access.audioTracks || [], subtitleTracks: s.current?.access.subtitleTracks || [], selectedAudioTrack: s.current?.access.selectedAudioTrack ?? null, selectedSubtitleTrack: s.current?.subtitleIndex ?? null, watchRecord: s.watchRecord };
   }
@@ -41,7 +41,7 @@ export class CastService {
     const network = browser ? this.#networks.get(params.networkId) : device?.network;
     if (!network || !this.#environment.networks().some((item) => item.id === network.id) || !browser && (!device || Date.now() - device.seenAt > 120_000)) throw castError("Actualisez la liste des appareils.");
     if (params.audioTrack !== undefined && !Number.isInteger(params.audioTrack) || params.subtitleTrack !== undefined && params.subtitleTrack !== null && !Number.isInteger(params.subtitleTrack)) throw castError("Choix de piste invalide.");
-    await this.stop(owner); this.#lastError = "";
+    await this.stop(owner);
     const s = { owner, queue, index: params.index, kind: browser ? "browser" : device.kind, deviceName: browser ? "Écran connecté" : device.name, autoNext: params.autoNext, phase: "connecting", loading: true, playing: false, buffering: false, position: position(params.position), duration: 0, volumeSupported: browser || device.kind === "chromecast" || Boolean(device.rendering), error: "", requests: new Set(), prepared: new Map(), failures: 0, version: 0, epoch: randomUUID(), lastReport: Date.now(), lastSave: 0, subtitlesEnabled: params.subtitleTrack !== null };
     this.#session = s;
     s.gateway = this.#environment.gateway({ network, deviceAddress: device?.address, vault: this.#vault, owner, state: () => ({ epoch: s.epoch, version: s.version, command: s.command, media: s.current?.media, loading: s.loading, error: s.error, position: s.position, playing: s.playing }), report: (value) => this.#report(s, value), onPair: () => { s.lastReport = Date.now(); } });
@@ -92,7 +92,7 @@ export class CastService {
       s.prepared.delete(index);
       if (this.#session !== s) { this.#drop(s, entry); return; }
       this.#drop(s, s.current); s.current = entry; s.audioLanguage = entry.access.audioLanguage; s.subtitleLanguage = entry.subtitleLanguage;
-      s.epoch = randomUUID(); s.finishedEpoch = null; s.version++; s.command = null; s.duration = entry.access.duration; s.position = position(start, s.duration); s.playing = !s.client; s.buffering = false; s.phase = "loading"; s.lastReport = Date.now(); s.watchRecord = undefined;
+      s.epoch = randomUUID(); s.finishedEpoch = null; s.version++; s.command = null; s.duration = entry.access.duration; s.position = position(start, s.duration); s.playing = !s.client; s.buffering = false; s.awaitingSince = null; s.phase = "loading"; s.lastReport = Date.now(); s.watchRecord = undefined;
       const remote = s.client ? await s.client.load(entry.media, s.position) : null;
       if (this.#session !== s) return;
       s.loading = false;
@@ -115,7 +115,12 @@ export class CastService {
   #update(s, value) {
     if (this.#session !== s || s.loading) return;
     if (Number.isFinite(value.volume) && value.volume >= 0 && value.volume <= 1) s.volume = value.volume;
-    s.position = position(value.position, s.duration); s.playing = Boolean(value.playing); s.buffering = Boolean(value.buffering); this.#sleep(s.playing || s.buffering);
+    if (!value.awaitingMedia && !value.stopped) s.position = position(value.position, s.duration);
+    s.playing = Boolean(value.playing); s.buffering = Boolean(value.buffering); this.#sleep(s.playing || s.buffering);
+    if (value.awaitingMedia) {
+      s.awaitingSince ??= Date.now();
+      if (Date.now() - s.awaitingSince > 30_000) { void this.#fail(s, castError("La TV n’a pas démarré la vidéo.", "CAST_MEDIA_START_TIMEOUT")); return; }
+    } else s.awaitingSince = null;
     if (value.ended && !s.finishing && s.finishedEpoch !== s.epoch) {
       s.finishing = true; s.finishedEpoch = s.epoch;
       void this.#save(s, true).then(async () => {
@@ -123,7 +128,7 @@ export class CastService {
         if (s.autoNext && s.index + 1 < s.queue.length) await this.#load(s, s.index + 1, 0);
         else { s.playing = false; s.position = s.duration; }
       }).catch((error) => this.#fail(s, error)).finally(() => { s.finishing = false; });
-    } else if (value.stopped) void this.stop(s.owner);
+    } else if (value.stopped) void this.#fail(s, castError(value.stopReason === "CAST_MEDIA_REPLACED" ? "La lecture a été remplacée sur la TV." : "Lecture arrêtée sur l’appareil.", value.stopReason || "CAST_REMOTE_STOPPED"));
   }
   #report(s, data) {
     if (this.#session !== s || s.kind !== "browser" || data.epoch !== s.epoch || data.version !== s.version || typeof data.playing !== "boolean" || typeof data.ended !== "boolean") return;
@@ -142,12 +147,13 @@ export class CastService {
         if (Date.now() - s.lastSave > 5000 && !s.loading) await this.#save(s);
       }
       s.failures = 0;
-    } catch (error) { if (++s.failures >= 3 || !s.client) await this.#fail(s, error); }
+    } catch (error) { if (++s.failures >= 3 || !s.client || ["CAST_MEDIA_ERROR", "CAST_MEDIA_REPLACED"].includes(error?.code)) await this.#fail(s, error); }
     finally { s.polling = false; }
   }
   async control(params, owner) {
-    const s = this.#session; if (!s || s.owner !== owner) throw castError("Aucun cast en cours.");
-    if (params.action === "stop") { await this.stop(owner); return this.status(owner); }
+    const s = this.#session;
+    if (params.action === "stop" && (!s || s.owner === owner)) { await this.stop(owner); return this.status(owner); }
+    if (!s || s.owner !== owner) throw castError("Aucun cast en cours.");
     if (params.action === "autoNext") { if (typeof params.value !== "boolean") throw castError("Option invalide."); s.autoNext = params.value; if (s.autoNext) this.#warm(s); else if (!s.loading) { for (const request of s.requests) this.#service.cancelMediaPreparation(request, s.owner); for (const job of s.prepared.values()) void job.then((entry) => this.#drop(s, entry)); s.prepared.clear(); } return this.status(owner); }
     if (s.loading || s.transition) throw castError("Vidéo en préparation.");
     if (["next", "previous", "episode", "tracks"].includes(params.action)) {
@@ -173,15 +179,25 @@ export class CastService {
     } else throw castError("Commande de cast invalide.");
     return this.status(owner);
   }
-  async #fail(s, error) { if (this.#session !== s) return; await this.stop(s.owner); this.#lastError = safeText(error?.message) || "Cast interrompu."; await this.#audit.append("cast.failed", { kind: s.kind, reason: safeText(error?.code || "CAST_FAILED", 64) }).catch(() => undefined); }
-  async stop(owner) {
-    const s = this.#session; if (!s || owner !== undefined && s.owner !== owner) return;
+  async #fail(s, error) {
+    if (this.#session !== s) return;
+    const delivery = s.gateway.delivery?.(s.current?.resourceId);
+    let explanation = safeText(error?.message) || "Cast interrompu.";
+    if (delivery && ["CAST_MEDIA_ERROR", "CAST_MEDIA_LOAD_FAILED", "CAST_MEDIA_START_TIMEOUT"].includes(error?.code)) explanation += delivery.requests === 0 ? " Aucune demande vidéo reçue sur le PC. Vérifie l’accès au réseau privé." : !delivery.accepted ? " L’accès au flux local a échoué." : " Le flux local est accessible, mais la TV n’a pas pu le lire.";
+    await this.stop(s.owner, { explanation, code: safeText(error?.code || "CAST_FAILED", 64) });
+    await this.#audit.append("cast.failed", { kind: s.kind, reason: safeText(error?.code || "CAST_FAILED", 64), ...(delivery ? { delivery } : {}) }).catch(() => undefined);
+  }
+  async stop(owner, failure) {
+    const s = this.#session;
+    if (!s || owner !== undefined && s.owner !== owner) { if (!failure && (owner === undefined || this.#terminal?.owner === owner)) this.#terminal = null; return; }
+    const terminal = failure ? { owner: s.owner, status: { ...this.status(s.owner), active: false, loading: false, playing: false, buffering: false, receiverUrl: undefined, pairingCode: undefined, error: failure.explanation } } : null;
+    this.#terminal = terminal;
     this.#session = null; clearInterval(s.timer); this.#sleep(false);
     for (const requestId of s.requests) this.#service.cancelMediaPreparation(requestId, s.owner);
-    await this.#save(s); this.#drop(s, s.current);
+    await this.#save(s); if (terminal && this.#terminal === terminal) terminal.status.watchRecord = s.watchRecord; this.#drop(s, s.current);
     for (const job of s.prepared.values()) void job.then((entry) => this.#drop(s, entry)); s.prepared.clear();
-    await s.gateway.close(); await s.client?.stop();
-    await this.#audit.append("cast.stopped", { kind: s.kind }).catch(() => undefined);
+    await Promise.allSettled([s.gateway.close(), failure ? s.client?.close?.() : s.client?.stop()]);
+    await this.#audit.append("cast.stopped", { kind: s.kind, reason: failure?.code || "CAST_USER_STOPPED" }).catch(() => undefined);
   }
   async close() { this.#discovery?.abort(); await this.stop(); }
 }

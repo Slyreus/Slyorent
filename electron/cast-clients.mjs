@@ -30,6 +30,19 @@ export function decodeCastMessage(data) {
   return { source: fields[2], destination: fields[3], namespace: fields[4], payload: JSON.parse(fields[6]) };
 }
 
+export function googleCastMediaStatus(item) {
+  const idle = item.playerState === "IDLE";
+  if (idle && item.idleReason === "ERROR") throw castError("La TV n’a pas pu ouvrir la vidéo.", "CAST_MEDIA_ERROR");
+  const awaitingMedia = item.extendedStatus?.playerState === "LOADING" || idle && !item.idleReason;
+  return { playing: item.playerState === "PLAYING", buffering: item.playerState === "BUFFERING" || awaitingMedia, awaitingMedia, position: Number(item.currentTime) || 0, duration: Number(item.media?.duration) || 0, volume: item.volume?.level, ended: idle && item.idleReason === "FINISHED", stopped: idle && ["CANCELLED", "INTERRUPTED"].includes(item.idleReason), stopReason: item.idleReason === "INTERRUPTED" ? "CAST_MEDIA_REPLACED" : "CAST_REMOTE_STOPPED" };
+}
+
+function responseError(payload) {
+  if (payload.type === "LOAD_FAILED") return castError("La TV a refusé la vidéo.", "CAST_MEDIA_LOAD_FAILED");
+  if (payload.type === "LOAD_CANCELLED") return castError("Chargement annulé sur la TV.", "CAST_MEDIA_LOAD_CANCELLED");
+  return castError("Commande Cast refusée.", `CAST_${payload.type}`);
+}
+
 export class GoogleCastClient {
   #device; #socket; #pending = new Map(); #requestId = 0; #transport; #session; #mediaSession; #heartbeat; #lastPong = Date.now(); #closed = false;
   constructor(device) { this.#device = device; }
@@ -54,7 +67,7 @@ export class GoogleCastClient {
           const pending = this.#pending.get(message.payload?.requestId);
           if (pending && pending.namespace === message.namespace) {
             this.#pending.delete(message.payload.requestId); clearTimeout(pending.timer);
-            if (["INVALID_REQUEST", "LOAD_FAILED", "LAUNCH_ERROR", "ERROR"].includes(message.payload.type)) pending.reject(castError("Commande Cast refusée."));
+            if (["INVALID_REQUEST", "INVALID_PLAYER_STATE", "LOAD_FAILED", "LOAD_CANCELLED", "LAUNCH_ERROR", "ERROR"].includes(message.payload.type)) pending.reject(responseError(message.payload));
             else pending.resolve(message.payload);
           }
         }
@@ -91,8 +104,8 @@ export class GoogleCastClient {
   }
   #status(result) {
     const item = result.status?.find((entry) => entry.mediaSessionId === this.#mediaSession);
-    if (!item) throw castError("La lecture a été remplacée sur l’appareil.");
-    return { playing: item.playerState === "PLAYING", buffering: item.playerState === "BUFFERING", position: Number(item.currentTime) || 0, duration: Number(item.media?.duration) || 0, ended: item.playerState === "IDLE" && item.idleReason === "FINISHED", stopped: item.playerState === "IDLE" && item.idleReason !== "FINISHED" };
+    if (!item) throw castError("La lecture a été remplacée sur l’appareil.", "CAST_MEDIA_REPLACED");
+    return googleCastMediaStatus(item);
   }
   async status() { return this.#status(await this.#request(MEDIA, this.#transport, { type: "GET_STATUS", mediaSessionId: this.#mediaSession })); }
   async command(action, value) {

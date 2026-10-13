@@ -51,7 +51,9 @@ export function CastPanel({ getBridge, request, onDismiss, onStarted, onProgress
         const next = await getBridge().castStatus?.(); if (!next || cancelled || mutating.current || snapshot !== revision.current) return;
         if (next.active) dismissedError.current = "";
         const visible = !next.active && next.error === dismissedError.current ? { ...next, error: undefined } : next;
-        setState((previous) => !visible.active && visible.error && previous.item ? { ...previous, ...visible } : visible);
+        setState((previous) => !visible.active && previous.item && (visible.error || previous.active || previous.error && previous.error !== dismissedError.current)
+          ? { ...previous, ...visible, loading: false, playing: false, buffering: false, error: visible.error || previous.error || "Cast arrêté sur l’appareil." }
+          : visible);
         if (next.watchRecord) onProgress(next.watchRecord.key, next.watchRecord);
         if (next.active && Date.now() - lastHistory > 6000) { lastHistory = Date.now(); const history = await getBridge().watchHistory(); if (!cancelled) for (const [key, record] of Object.entries(history)) onProgress(key, record); }
       } catch { if (!cancelled && snapshot === revision.current && !mutating.current) setError("Connexion au cast interrompue."); }
@@ -99,7 +101,7 @@ export function CastPanel({ getBridge, request, onDismiss, onStarted, onProgress
     catch (caught) { setError(message(caught)); } finally { setBusy(false); }
     mutating.current = false;
   }
-  function dismissFailure() { dismissedError.current = state.error || ""; revision.current++; setState({ active: false }); setError(""); }
+  function dismissFailure() { dismissedError.current = state.error || ""; revision.current++; setState({ active: false }); setError(""); void getBridge().castControl?.({ action: "stop" }).catch(() => undefined); }
   const progress = state.duration ? Math.round((state.position || 0) / state.duration * 1000) : 0;
   const queue = state.queue || lastStart?.queue || [];
   const index = state.index || 0;

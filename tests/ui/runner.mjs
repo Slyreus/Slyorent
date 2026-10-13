@@ -73,6 +73,7 @@ ipcMain.handle("media-test", async (_event, method, params = {}) => {
       return castState;
     }
     case "castFailure": clearTimeout(castTimer); castState = { active: false, error: "Appareil de test déconnecté." }; return true;
+    case "castSilentStop": clearTimeout(castTimer); castState = { active: false }; return true;
     case "fullscreen": return window.webContents.executeJavaScript("document.querySelector('.sly-media-player').requestFullscreen().then(() => true, () => false)", true);
     case "renewMedia": return vault.renew(params.url, window.webContents.id);
     case "releaseMedia": outstanding.delete(params.url); return vault.release(params.url, window.webContents.id);
