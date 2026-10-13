@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import http from "node:http";
+import { EventEmitter } from "node:events";
 import test from "node:test";
 import { CastGateway } from "../electron/cast-gateway.mjs";
 import { CastService, castQueue } from "../electron/cast-service.mjs";
 import { castDeviceId, castNetworks, dnsRecords, localDeviceUrl, privateAddress, rendererDescription, sameNetwork } from "../electron/cast-network.mjs";
-import { decodeCastMessage, encodeCastMessage, googleCastMediaStatus } from "../electron/cast-clients.mjs";
+import { decodeCastMessage, encodeCastMessage, GoogleCastClient, googleCastMediaStatus } from "../electron/cast-clients.mjs";
 import { analyzeProbe, conversionVideoArgs } from "../electron/media-profile.mjs";
 
 test("borner le réseau, les descriptions et les messages Cast", () => {
@@ -97,6 +98,93 @@ test("conserver l’épisode et le motif après un arrêt de la TV", async () =>
 });
 
 const until = async (check) => { const start = Date.now(); while (!check()) { if (Date.now() - start > 3000) throw new Error("Session non prête"); await new Promise((resolve) => setTimeout(resolve, 5)); } };
+
+const mediaNamespace = "urn:x-cast:com.google.cast.media";
+class CastTestSocket extends EventEmitter {
+  writable = true; transport = "transport-test"; mediaId = 0; remoteStatus = []; requests = []; finishOnStatus = false; statusReply = "normal";
+  open() { setImmediate(() => this.emit("secureConnect")); return this; }
+  setTimeout() { return this; }
+  message(payload, source = this.transport, namespace = mediaNamespace) { this.emit("data", encodeCastMessage(namespace, "sender-slyorrent", payload, source)); }
+  finish(reason = "FINISHED", mediaId = this.mediaId, source = this.transport) {
+    this.message({ type: "MEDIA_STATUS", requestId: 0, status: [{ mediaSessionId: mediaId, playerState: "IDLE", idleReason: reason, currentTime: 0 }] }, source);
+    if (mediaId === this.mediaId && source === this.transport) this.remoteStatus = [];
+  }
+  write(frame) {
+    const { namespace, payload } = decodeCastMessage(frame.subarray(4));
+    this.requests.push(payload);
+    queueMicrotask(() => {
+      if (payload.type === "LAUNCH") this.message({ type: "RECEIVER_STATUS", requestId: payload.requestId, status: { applications: [{ appId: "CC1AD845", transportId: this.transport, sessionId: "receiver-test" }] } }, "receiver-0", namespace);
+      else if (payload.type === "LOAD") {
+        this.mediaId++; this.statusReply = "normal";
+        this.remoteStatus = [{ mediaSessionId: this.mediaId, playerState: "PLAYING", currentTime: payload.currentTime, media: { duration: 20 } }];
+        this.message({ type: "MEDIA_STATUS", requestId: payload.requestId, status: this.remoteStatus });
+      } else if (namespace === mediaNamespace) {
+        if (payload.type === "GET_STATUS" && this.finishOnStatus) { this.finishOnStatus = false; this.finish(); }
+        this.message({ type: payload.type === "GET_STATUS" && this.statusReply === "invalid" ? "INVALID_PLAYER_STATE" : "MEDIA_STATUS", requestId: payload.requestId, status: this.statusReply === "empty" ? [] : this.remoteStatus });
+      }
+    });
+    return true;
+  }
+  destroy(error) { this.writable = false; if (error) this.emit("error", error); this.emit("close"); }
+}
+const castTestDevice = { id: "tv", kind: "chromecast", name: "TV de test", address: "192.168.1.20", network: { id: "home", address: "192.168.1.10", netmask: "255.255.255.0" }, seenAt: Date.now() };
+
+test("retenir la fin spontanée avant la disparition de la session Cast", async () => {
+  const socket = new CastTestSocket(), client = new GoogleCastClient(castTestDevice, { socketFactory: () => socket.open() });
+  const media = { title: "Vidéo de test", url: "http://192.168.1.10/video", mimeType: "video/mp4", duration: 20 };
+  try {
+    await client.connect(); await client.load(media, 0);
+    socket.finish("FINISHED", socket.mediaId, "autre-transport");
+    assert.equal((await client.status()).ended, false);
+    socket.finish("FINISHED", 999);
+    assert.equal((await client.status()).ended, false);
+    socket.finishOnStatus = true; socket.statusReply = "empty";
+    assert.equal((await client.status()).ended, true, "La réponse vide efface la notification de fin");
+    const requests = socket.requests.length, previousId = socket.mediaId;
+    assert.equal((await client.status()).ended, true); assert.equal(socket.requests.length, requests);
+    await client.load(media, 0); socket.finish("FINISHED", previousId);
+    assert.equal((await client.status()).ended, false, "Un ancien épisode termine le nouveau");
+    socket.finish("CANCELLED"); socket.finish("FINISHED");
+    assert.equal((await client.status()).stopped, true, "Un arrêt explicite devient une fin naturelle");
+    await client.load(media, 0); socket.finishOnStatus = true; socket.statusReply = "invalid";
+    assert.equal((await client.status()).ended, true, "La session expirée masque la notification de fin");
+    socket.message({ type: "MEDIA_STATUS", requestId: 0, status: [{ mediaSessionId: 1234, playerState: "PLAYING" }] }); socket.remoteStatus = [{ mediaSessionId: 1234, playerState: "PLAYING" }]; socket.statusReply = "normal";
+    await assert.rejects(client.status(), { code: "CAST_MEDIA_REPLACED" });
+    await client.load(media, 0); socket.finish("ERROR");
+    await assert.rejects(client.status(), { code: "CAST_MEDIA_ERROR" });
+  } finally { client.close(); }
+});
+
+test("enchaîner sur une fin Google Cast sans lancer deux fois le suivant", async () => {
+  const socket = new CastTestSocket(), records = [], events = [];
+  let client;
+  const service = new CastService({
+    networks: () => [castTestDevice.network], discover: async () => [{ ...castTestDevice, seenAt: Date.now() }],
+    gateway: () => ({ start: async () => undefined, addMedia: (access) => ({ url: access.url, resourceId: access.url }), remove: () => undefined, close: async () => undefined }),
+    client: (device) => { client = new GoogleCastClient(device, { socketFactory: () => socket.open() }); return client; },
+    service: { mediaPreparation: () => null, cancelMediaPreparation: () => undefined, mediaReference: async ({ fileIndex }) => ({ hash: "a".repeat(40), fileIndex }), openMedia: async ({ fileIndex }) => ({ url: `http://192.168.1.10/video-${fileIndex}`, duration: 20, mimeType: "video/mp4", audioTracks: [], subtitleTracks: [] }) },
+    vault: { release: () => undefined, renew: async () => undefined },
+    history: { update: async (_hash, fileIndex, values) => { records.push({ fileIndex, ...values }); return values; } }, audit: { append: async (event, details) => { events.push({ event, details }); } },
+  });
+  try {
+    await service.discover();
+    await service.start({ deviceId: "tv", queue: Array.from({ length: 3 }, (_, fileIndex) => ({ id: 1, fileIndex, title: `Épisode ${fileIndex + 1}` })), index: 0, position: 0, autoNext: true, subtitleTrack: null }, 7);
+    await until(() => !service.status(7).loading);
+    const firstId = socket.mediaId;
+    socket.finish(); socket.finish();
+    await until(() => service.status(7).index === 1 && !service.status(7).loading);
+    assert.deepEqual(socket.requests.filter(item => item.type === "LOAD").map(item => item.media.metadata.title), ["Épisode 1", "Épisode 2"]);
+    assert.equal(socket.requests.some(item => item.type === "PAUSE"), false);
+    assert.ok(records.some(item => item.fileIndex === 0 && item.completed && item.position === 20));
+    assert.equal(events.filter(item => item.event === "cast.episode_finished").length, 1);
+    socket.finish("FINISHED", firstId);
+    assert.equal((await client.status()).ended, false);
+    socket.finish("CANCELLED");
+    await until(() => !service.status(7).active);
+    assert.equal(socket.requests.filter(item => item.type === "LOAD").length, 2, "La télé a arrêté la lecture, mais un épisode a démarré");
+  } finally { await service.close(); }
+});
+
 test("attendre le lecteur distant et suivre les commandes et la file", async () => {
   const network = { id: "home", address: "192.168.1.10", netmask: "255.255.255.0" }, commands = [], loads = [];
   let releaseLoad, releasePoll;

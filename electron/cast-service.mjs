@@ -87,7 +87,7 @@ export class CastService {
     try {
       await this.#save(s); s.index = index; s.position = position(start); s.duration = 0;
       for (const [key, job] of s.prepared) if (key !== index && key !== index + 1) { s.prepared.delete(key); void job.then((entry) => this.#drop(s, entry)); }
-      if (s.current) { if (s.client) await s.client.command("pause").catch(() => undefined); else { s.command = { action: "pause" }; s.version++; } }
+      if (s.current && s.finishedEpoch !== s.epoch) { if (s.client) await s.client.command("pause").catch(() => undefined); else { s.command = { action: "pause" }; s.version++; } }
       const entry = tracks ? await this.#prepare(s, index, tracks) : await (s.prepared.get(index) || Promise.resolve(null)) || await this.#prepare(s, index);
       s.prepared.delete(index);
       if (this.#session !== s) { this.#drop(s, entry); return; }
@@ -123,6 +123,7 @@ export class CastService {
     } else s.awaitingSince = null;
     if (value.ended && !s.finishing && s.finishedEpoch !== s.epoch) {
       s.finishing = true; s.finishedEpoch = s.epoch;
+      void this.#audit.append("cast.episode_finished", { index: s.index, total: s.queue.length, autoNext: s.autoNext, hasNext: s.index + 1 < s.queue.length }).catch(() => undefined);
       void this.#save(s, true).then(async () => {
         if (this.#session !== s) return;
         if (s.autoNext && s.index + 1 < s.queue.length) await this.#load(s, s.index + 1, 0);

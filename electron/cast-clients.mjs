@@ -9,8 +9,8 @@ const MAX_FRAME = 64 * 1024;
 const varint = (value) => { const bytes = []; do { bytes.push((value & 127) | (value > 127 ? 128 : 0)); value >>>= 7; } while (value); return Buffer.from(bytes); };
 const stringField = (number, value) => { const data = Buffer.from(value); return Buffer.concat([varint(number * 8 + 2), varint(data.length), data]); };
 
-export function encodeCastMessage(namespace, destination, payload) {
-  const data = Buffer.concat([Buffer.from([8, 0]), stringField(2, "sender-slyorrent"), stringField(3, destination), stringField(4, namespace), Buffer.from([40, 0]), stringField(6, JSON.stringify(payload))]);
+export function encodeCastMessage(namespace, destination, payload, source = "sender-slyorrent") {
+  const data = Buffer.concat([Buffer.from([8, 0]), stringField(2, source), stringField(3, destination), stringField(4, namespace), Buffer.from([40, 0]), stringField(6, JSON.stringify(payload))]);
   if (data.length > MAX_FRAME) throw castError("Commande Cast trop volumineuse.");
   const header = Buffer.alloc(4); header.writeUInt32BE(data.length);
   return Buffer.concat([header, data]);
@@ -44,13 +44,13 @@ function responseError(payload) {
 }
 
 export class GoogleCastClient {
-  #device; #socket; #pending = new Map(); #requestId = 0; #transport; #session; #mediaSession; #heartbeat; #lastPong = Date.now(); #closed = false;
-  constructor(device) { this.#device = device; }
+  #device; #socket; #socketFactory; #pending = new Map(); #terminalStatuses = new Map(); #requestId = 0; #transport; #session; #mediaSession; #heartbeat; #lastPong = Date.now(); #closed = false;
+  constructor(device, { socketFactory = (options) => tls.connect(options) } = {}) { this.#device = device; this.#socketFactory = socketFactory; }
   async connect() {
     if (!sameNetwork(this.#device.address, this.#device.network)) throw castError("Appareil hors du réseau local.");
     // Les récepteurs Cast utilisent un certificat auto-signé. Cette exception
     // reste limitée à cette socket et à l'adresse privée choisie.
-    const socket = this.#socket = tls.connect({ host: this.#device.address, port: 8009, localAddress: this.#device.network.address, rejectUnauthorized: false, minVersion: "TLSv1.2" });
+    const socket = this.#socket = this.#socketFactory({ host: this.#device.address, port: 8009, localAddress: this.#device.network.address, rejectUnauthorized: false, minVersion: "TLSv1.2" });
     socket.setTimeout(12_000, () => socket.destroy(castError("Connexion Cast expirée.")));
     let buffer = Buffer.alloc(0);
     socket.on("data", (chunk) => {
@@ -64,6 +64,7 @@ export class GoogleCastClient {
             this.#lastPong = Date.now();
             if (message.payload?.type === "PING") this.#send(HEARTBEAT, message.source, { type: "PONG" });
           }
+          this.#rememberStatus(message);
           const pending = this.#pending.get(message.payload?.requestId);
           if (pending && pending.namespace === message.namespace) {
             this.#pending.delete(message.payload.requestId); clearTimeout(pending.timer);
@@ -85,6 +86,17 @@ export class GoogleCastClient {
     this.#transport = application.transportId; this.#session = application.sessionId;
     this.#send(CONNECTION, this.#transport, { type: "CONNECT" });
   }
+  #rememberStatus(message) {
+    if (message.namespace !== MEDIA || message.source !== this.#transport || !["sender-slyorrent", "*"].includes(message.destination) || message.payload?.type !== "MEDIA_STATUS" || !Array.isArray(message.payload.status)) return;
+    if (!message.payload.status.some((item) => item.mediaSessionId === this.#mediaSession) && message.payload.status.some((item) => item.mediaSessionId !== this.#mediaSession && ["PLAYING", "PAUSED", "BUFFERING"].includes(item.playerState))) this.#terminalStatuses.delete(this.#mediaSession);
+    for (const item of message.payload.status) {
+      if (!Number.isSafeInteger(item.mediaSessionId) || item.playerState !== "IDLE" || !["FINISHED", "CANCELLED", "INTERRUPTED", "ERROR"].includes(item.idleReason)) continue;
+      const previous = this.#terminalStatuses.get(item.mediaSessionId);
+      if (item.idleReason === "FINISHED" && previous && previous.idleReason !== "FINISHED") continue;
+      this.#terminalStatuses.set(item.mediaSessionId, item);
+      if (this.#terminalStatuses.size > 4) this.#terminalStatuses.delete(this.#terminalStatuses.keys().next().value);
+    }
+  }
   #fail() { this.#closed = true; clearInterval(this.#heartbeat); for (const job of this.#pending.values()) { clearTimeout(job.timer); job.reject(castError("Appareil Cast déconnecté.")); } this.#pending.clear(); }
   #send(namespace, destination, payload) { if (!this.#closed && this.#socket?.writable) this.#socket.write(encodeCastMessage(namespace, destination, payload)); }
   #request(namespace, destination, payload) {
@@ -96,6 +108,7 @@ export class GoogleCastClient {
     });
   }
   async load(media, position) {
+    this.#terminalStatuses.clear();
     const tracks = media.subtitleUrl ? [{ trackId: 1, type: "TEXT", trackContentId: media.subtitleUrl, trackContentType: "text/vtt", subtype: "SUBTITLES", name: "Sous-titres", language: media.language || "fr" }] : [];
     const result = await this.#request(MEDIA, this.#transport, { type: "LOAD", autoplay: true, currentTime: position, activeTrackIds: tracks.length ? [1] : [], media: { contentId: media.url, contentType: media.mimeType, streamType: "BUFFERED", duration: media.duration, metadata: { metadataType: 0, title: media.title }, tracks } });
     this.#mediaSession = result.status?.[0]?.mediaSessionId;
@@ -104,10 +117,16 @@ export class GoogleCastClient {
   }
   #status(result) {
     const item = result.status?.find((entry) => entry.mediaSessionId === this.#mediaSession);
-    if (!item) throw castError("La lecture a été remplacée sur l’appareil.", "CAST_MEDIA_REPLACED");
-    return googleCastMediaStatus(item);
+    const terminal = this.#terminalStatuses.get(this.#mediaSession);
+    if (!item && (!terminal || result.status?.length)) throw castError("La lecture a été remplacée sur l’appareil.", "CAST_MEDIA_REPLACED");
+    return googleCastMediaStatus(terminal || item);
   }
-  async status() { return this.#status(await this.#request(MEDIA, this.#transport, { type: "GET_STATUS", mediaSessionId: this.#mediaSession })); }
+  async status() {
+    const terminal = this.#terminalStatuses.get(this.#mediaSession);
+    if (terminal) return googleCastMediaStatus(terminal);
+    try { return this.#status(await this.#request(MEDIA, this.#transport, { type: "GET_STATUS", mediaSessionId: this.#mediaSession })); }
+    catch (error) { const latest = this.#terminalStatuses.get(this.#mediaSession); if (latest && error?.code !== "CAST_MEDIA_REPLACED") return googleCastMediaStatus(latest); throw error; }
+  }
   async command(action, value) {
     if (action === "volume") return this.#request(RECEIVER, "receiver-0", { type: "SET_VOLUME", volume: { level: value } });
     return this.#request(MEDIA, this.#transport, { type: { play: "PLAY", pause: "PAUSE", seek: "SEEK", stop: "STOP" }[action], mediaSessionId: this.#mediaSession, ...(action === "seek" ? { currentTime: value } : {}) });

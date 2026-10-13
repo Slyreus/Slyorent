@@ -10,6 +10,8 @@ L’option Épisode suivant automatique prépare le prochain fichier et le lance
 
 Google Cast utilise le récepteur média standard. DLNA repose sur AVTransport ; selon la TV, les sous-titres séparés et le déplacement dans la vidéo peuvent être refusés. Un navigateur récent peut servir de lecteur sur une tablette, un téléphone ou un autre ordinateur. Les vidéos sont préparées en MP4 H.264/AAC, avec une conversion limitée à 1080p si nécessaire. La compatibilité de chaque modèle doit être vérifiée sur l’appareil. AirPlay et Miracast ne sont pas inclus.
 
+La fin d’un épisode est conservée même si Google Cast retire aussitôt sa session de lecture. Le suivant démarre sans envoyer de pause à l’épisode terminé. Un arrêt depuis la télé reste un arrêt et ne lance pas la suite. Le journal distingue la fin d’un épisode d’une interruption.
+
 Le PC et l’écran doivent rester allumés, sur le même réseau privé. Un réseau invité peut isoler les appareils. Si Windows demande une autorisation, n’autorise Slyorrent que sur les réseaux privés. L’application ne désactive pas le pare-feu et n’ouvre aucun port sur la box. Le Wi-Fi du PC et celui de l’écran doivent pouvoir communiquer ; un VPN peut aussi empêcher la découverte.
 
 Le partage est limité à l’appareil choisi et aux médias en cours de lecture ou de préparation. Il n’expose ni le disque ni toute la bibliothèque. Les fichiers gardent la validation du lecteur local et les copies passent par Defender. Le flux vidéo n’est pas chiffré : ce mode est prévu pour un réseau de confiance.
