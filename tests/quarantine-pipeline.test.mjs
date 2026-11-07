@@ -368,7 +368,12 @@ test("un téléchargement reste réciproque, puis s'arrête et ne seed qu'après
 
 test("afficher un échec de rangement et attendre une relance manuelle, même après redémarrage", async t => {
   const root = await mkdtemp(path.join(await realpath(os.tmpdir()), "slyorrent-move-failure-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(async () => {
+    const resolved = await realpath(root);
+    assert.equal(path.dirname(resolved), await realpath(os.tmpdir()));
+    assert.ok(path.basename(resolved).startsWith("slyorrent-move-failure-"));
+    await rm(resolved, { recursive: true, force: true });
+  });
   const quarantine = path.join(root, "quarantine"), library = path.join(root, "library"), profile = path.join(root, "profile");
   await Promise.all([quarantine, library, profile].map(directory => mkdir(directory)));
   const timeline = [], { manager, state } = localManager({ quarantine, library, profile, timeline });

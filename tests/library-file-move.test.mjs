@@ -5,9 +5,16 @@ import path from "node:path";
 import test from "node:test";
 import { stageLibraryFiles } from "../electron/library-file-move.mjs";
 
+async function removeTemporary(root) {
+  const resolved = await realpath(root);
+  assert.equal(path.dirname(resolved), await realpath(os.tmpdir()));
+  assert.ok(path.basename(resolved).startsWith("slyorrent-file-"));
+  await rm(resolved, { recursive: true, force: true });
+}
+
 test("ranger les chemins longs et les copies entre volumes sans supprimer la source avant confirmation", async t => {
   const root = await mkdtemp(path.join(await realpath(os.tmpdir()), "slyorrent-file-move-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => removeTemporary(root));
   for (const copied of [false, true]) {
     const destination = path.join(root, copied ? "copy" : "link");
     const name = `${"serie-".repeat(12)}/${"saison-".repeat(12)}/${"episode-".repeat(10)}.mkv`;
@@ -29,7 +36,7 @@ test("ranger les chemins longs et les copies entre volumes sans supprimer la sou
 
 test("conserver les originaux et les fichiers existants si le rangement échoue", async t => {
   const root = await mkdtemp(path.join(await realpath(os.tmpdir()), "slyorrent-file-collision-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => removeTemporary(root));
   const destination = path.join(root, "library");
   await mkdir(destination);
   const files = [];
