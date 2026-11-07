@@ -4,12 +4,20 @@ Slyorrent distribue plusieurs composants qui gardent leur licence d’origine. C
 
 ## Transmission 4.1.4
 
-Le moteur P2P est un sous-ensemble du paquet Windows x64 officiel Transmission 4.1.4 : le daemon, ses DLL et ses plugins Qt nécessaires. Transmission est distribué sous GNU GPL v2 ou version ultérieure, avec certains composants sous licences compatibles.
+Le moteur P2P conserve le daemon signé du paquet Windows x64 officiel Transmission 4.1.4 et zlib 1.3.2. OpenSSL et libcurl sont remplacés par les versions corrigées décrites ci-dessous. Les bibliothèques Qt inutilisées ne sont pas distribuées. Transmission est distribué sous GNU GPL v2 ou version ultérieure, avec certains composants sous licences compatibles.
 
 - Projet et source exacte : https://github.com/transmission/transmission/tree/4.1.4
 - Publication officielle : https://github.com/transmission/transmission/releases/tag/4.1.4
 - Licence : https://github.com/transmission/transmission/blob/4.1.4/COPYING
 - SHA-256 du MSI utilisé : `cf51e5772f39a3ead3c8f763b689399b9b4b8b016a4c0ca68ab5d6c634be2e1c`
+
+## OpenSSL 3.5.9, libcurl 8.23.0 et zlib 1.3.2
+
+Les DLL OpenSSL et libcurl sont compilées pour Slyorrent depuis les archives officielles dont les empreintes sont épinglées. libcurl inclut aussi une copie statique de zlib 1.3.2. Les recettes de compilation sont dans `scripts/build-openssl.ps1` et `scripts/build-curl.ps1`. Les licences et la configuration du build accompagnent l’application. Les archives de sources et de bibliothèques sont jointes à la release.
+
+- OpenSSL : Apache-2.0 — https://github.com/openssl/openssl/releases/tag/openssl-3.5.9
+- curl : licence curl — https://github.com/curl/curl/releases/tag/curl-8_23_0
+- zlib : licence zlib — https://github.com/madler/zlib/releases/tag/v1.3.2
 
 ## FFmpeg et FFprobe 9.0.2
 

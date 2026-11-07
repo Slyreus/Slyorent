@@ -5,33 +5,22 @@ import { access, lstat, mkdir, readFile, readdir, realpath, rename, unlink, writ
 import path from "node:path";
 import { TransmissionRpcClient } from "./transmission-rpc.mjs";
 import { canonicalPathWithoutLinks, UnsafePathError } from "./safe-path.mjs";
+import { NETWORK_DLLS, NETWORK_ENGINE_DIRECTORY } from "./network-runtime.mjs";
 
 const EXPECTED_DAEMON_SHA256 = "1ce3ebd74e4067962bfd04e8cbe6c891ec8f12d64bcc2dc908762520fc2a8816";
-const ENGINE_RELATIVE_PATH = path.join(".runtime", "engine", "transmission-4.1.4", "PFiles", "Transmission", "transmission-daemon.exe");
+const ENGINE_RELATIVE_PATH = path.join(".runtime", "engine", NETWORK_ENGINE_DIRECTORY, "PFiles", "Transmission", "transmission-daemon.exe");
 // Conserver le chemin installé pour préserver les autorisations réseau existantes.
 const PACKAGED_ENGINE_RELATIVE_PATH = path.join(".runtime", "engine", "transmission-4.1.3", "PFiles", "Transmission", "transmission-daemon.exe");
 const STORAGE_POLICY_SCHEMA_VERSION = 1;
 const MAX_ALLOWED_DOWNLOAD_DIRECTORIES = 32;
 const EXPECTED_ENGINE_DLLS = Object.freeze({
-  "dbus-1.dll": "48f5d441e8fca6878817f2fe1a1bb62eec36aedab1ec238670d07d85efb335be",
-  "imageformats/qgif.dll": "8eb323e9a8707dc7864d658973b59f522cc42d34b1b6e1ceecb187498ff1a1d9",
-  "imageformats/qico.dll": "fb1f33e3d959d98c4a4985bad7c85319978c78f8170c630d436ac55cec4aa28a",
-  "imageformats/qjpeg.dll": "f87e5632c67cb05be34fbf74bbd99f66c189b8c725fcf7d7d5ed59e6f56f136b",
-  "imageformats/qsvg.dll": "f20b52ee9499adea29d06e2f2ce494b713bb0c59d23f1da93601316c11798144",
-  "libcrypto-3-x64.dll": "dadd54776f7dead0130acf18938cbdc89bdfa7e4d036d66aa735a24ab84e877e",
-  "libcurl.dll": "d4355ef95608f08f21892bf2dbf0acc5618517882a02533a36123612879e1bcf",
-  "libssl-3-x64.dll": "537170dc0cdf023437bea8d59d298823d60bca200e1d70be85f2a1da3dfd4d55",
-  "platforms/qwindows.dll": "2b294fedd287b67aa05ca91b6bc9acebf72663d46fc410faa6d0cc9602a255c9",
-  "qt6core.dll": "3f2c6985d89e3aa71088943f2cc981a56ff0465eeb0147698c426269669f1129",
-  "qt6dbus.dll": "8e7d7c11cfd96105f3b44dfb89c2814958bcf8cf7c52db192bd26d4be0b3b3c0",
-  "qt6gui.dll": "f57bd1f1b9beb9f0341b36dc42fdb5c317afb32a2f97b8a8d9695e300f6b7fe7",
-  "qt6network.dll": "be301be57cc0597043c48535718d72d311478b0e57ac8261eb22e251c15a0506",
-  "qt6svg.dll": "61e40328f42a7c0d00ee2ebb94f43e9e27308d526fad7b00ea5246fe8f4207b6",
-  "qt6widgets.dll": "fc2c414c3aa26b551fc89a5bbc8f306635710123a747c2579da6830fcc181279",
-  "styles/qmodernwindowsstyle.dll": "58944f31d7215a742dacf24c397acc8cceba43f96b56b648cdb53915a9d2e4e5",
-  "tls/qopensslbackend.dll": "7634c6104c1435c5e1377f65748317fc5341dcb87f8759b276b65db7f00ab825",
+  ...NETWORK_DLLS,
   "z.dll": "11d13bd3c0e711cb00f7de24ef2c9c8034b4c8a149c71f52f2ab05900d24cf5c",
 });
+
+export function trustedEngineFiles() {
+  return Object.freeze({ "transmission-daemon.exe": EXPECTED_DAEMON_SHA256, ...EXPECTED_ENGINE_DLLS });
+}
 
 function randomCredential(prefix) {
   return `${prefix}-${randomBytes(24).toString("base64url")}`;
@@ -92,8 +81,6 @@ async function verifyEngineDlls(engineDirectory) {
     if (path.dirname(candidate) !== engineDirectory && !candidate.startsWith(`${engineDirectory}${path.sep}`)) throw new Error("Une DLL Transmission sort de son répertoire.");
     if (await sha256File(candidate) !== expectedHash) throw new Error(`Empreinte inattendue pour ${relativeName}.`);
   }
-  const qtConfig = path.join(engineDirectory, "qt.conf");
-  if (await sha256File(qtConfig) !== "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855") throw new Error("La configuration Qt du moteur a été modifiée.");
 }
 
 function secureEngineEnvironment(engineDirectory) {

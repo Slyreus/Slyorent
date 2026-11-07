@@ -7,22 +7,20 @@ import { extractFile, listPackage } from "@electron/asar";
 import { NtExecutable, NtExecutableResource, Resource } from "resedit";
 import { inspectWindowsIco } from "./icon-resources.mjs";
 import { mediaPathsForApp, MEDIA_SHA256 } from "../electron/media-binaries.mjs";
+import { NETWORK_ENGINE_DIRECTORY } from "../electron/network-runtime.mjs";
+import { trustedEngineFiles } from "../electron/transmission-manager.mjs";
 
 const root = path.resolve(process.argv[2] || ".");
 const expectedPackage = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
 const resources = path.join(root, "release", "win-unpacked", "resources");
 const asarPath = path.join(resources, "app.asar");
-const engineSource = path.join(root, ".runtime", "engine", "transmission-4.1.4", "PFiles", "Transmission");
+const engineSource = path.join(root, ".runtime", "engine", NETWORK_ENGINE_DIRECTORY, "PFiles", "Transmission");
 const enginePackaged = path.join(resources, ".runtime", "engine", "transmission-4.1.3", "PFiles", "Transmission");
 const errors = [];
-const castFiles = ["electron/cast-network.mjs", "electron/cast-clients.mjs", "electron/cast-gateway.mjs", "electron/cast-service.mjs", "electron/cast-receiver/index.html", "electron/cast-receiver/receiver.js", "electron/cast-receiver/receiver.css", "electron/main.mjs", "electron/preload.cjs", "electron/torrent-service.mjs"];
+const runtimeFiles = ["electron/network-runtime.mjs", "electron/cast-network.mjs", "electron/cast-clients.mjs", "electron/cast-gateway.mjs", "electron/cast-service.mjs", "electron/cast-receiver/index.html", "electron/cast-receiver/receiver.js", "electron/cast-receiver/receiver.css", "electron/main.mjs", "electron/preload.cjs", "electron/torrent-service.mjs"];
 
-const engineFiles = [
-  "dbus-1.dll", "imageformats/qgif.dll", "imageformats/qico.dll", "imageformats/qjpeg.dll", "imageformats/qsvg.dll",
-  "libcrypto-3-x64.dll", "libcurl.dll", "libssl-3-x64.dll", "platforms/qwindows.dll", "qt.conf",
-  "Qt6Core.dll", "Qt6DBus.dll", "Qt6Gui.dll", "Qt6Network.dll", "Qt6Svg.dll", "Qt6Widgets.dll",
-  "styles/qmodernwindowsstyle.dll", "tls/qopensslbackend.dll", "transmission-daemon.exe", "z.dll",
-].map((file) => file.toLowerCase()).sort();
+const enginePins = trustedEngineFiles();
+const engineFiles = Object.keys(enginePins).sort();
 
 async function sha256(filePath) {
   return createHash("sha256").update(await readFile(filePath)).digest("hex");
@@ -52,10 +50,10 @@ if (await regularFile(asarPath, "app.asar")) {
     if (forbiddenRoots.some((prefix) => entry === prefix.slice(0, -1) || entry.startsWith(prefix))) errors.push(`entrée interdite dans app.asar : ${entry}`);
     if (/\.(?:env|key|log|mmdb|msi|part|pem|pfx|resume|torrent)$/iu.test(entry)) errors.push(`fichier sensible dans app.asar : ${entry}`);
   }
-  for (const required of ["dist/index.html", "electron/main.mjs", "electron/preload.cjs", "electron/transmission-manager.mjs", "electron/library-preferences.mjs", "electron/library-preferences-schema.mjs", "electron/library-destination.mjs", "electron/library-file-move.mjs", "electron/media-binaries.mjs", "electron/media-binary-path.mjs", "electron/media-adapter.mjs", "electron/media-profile.mjs", "electron/subtitles.mjs", "public/slyorus.png", "public/slyorrent-logo.png", ...castFiles]) {
+  for (const required of ["dist/index.html", "electron/main.mjs", "electron/preload.cjs", "electron/transmission-manager.mjs", "electron/library-preferences.mjs", "electron/library-preferences-schema.mjs", "electron/library-destination.mjs", "electron/library-file-move.mjs", "electron/media-binaries.mjs", "electron/media-binary-path.mjs", "electron/media-adapter.mjs", "electron/media-profile.mjs", "electron/subtitles.mjs", "public/slyorus.png", "public/slyorrent-logo.png", ...runtimeFiles]) {
     if (!entries.includes(required)) errors.push(`entrée requise absente de app.asar : ${required}`);
   }
-  for (const module of ["electron/transmission-manager.mjs", "electron/library-preferences.mjs", "electron/library-preferences-schema.mjs", "electron/media-adapter.mjs", "electron/media-binary-path.mjs", "electron/media-binaries.mjs", "electron/library-destination.mjs", "electron/library-file-move.mjs", "electron/media-profile.mjs", "electron/subtitles.mjs", ...castFiles]) {
+  for (const module of ["electron/transmission-manager.mjs", "electron/library-preferences.mjs", "electron/library-preferences-schema.mjs", "electron/media-adapter.mjs", "electron/media-binary-path.mjs", "electron/media-binaries.mjs", "electron/library-destination.mjs", "electron/library-file-move.mjs", "electron/media-profile.mjs", "electron/subtitles.mjs", ...runtimeFiles]) {
     if (entries.includes(module) && !extractFile(asarPath, path.join(...module.split("/"))).equals(await readFile(path.join(root, module)))) errors.push(`module de médiathèque périmé : ${module}`);
   }
   const frontendFiles = (await relativeFiles(path.join(root, "dist"))).map(file => `dist/${file}`).sort();
@@ -107,7 +105,7 @@ for (const relativeName of engineFiles) {
   const source = path.join(engineSource, ...relativeName.split("/"));
   const packaged = path.join(enginePackaged, ...relativeName.split("/"));
   if (await regularFile(source, `source Transmission ${relativeName}`) && await regularFile(packaged, `Transmission embarqué ${relativeName}`)) {
-    if (await sha256(source) !== await sha256(packaged)) errors.push(`Transmission modifié pendant le packaging : ${relativeName}`);
+    if (await sha256(source) !== enginePins[relativeName] || await sha256(packaged) !== enginePins[relativeName]) errors.push(`Transmission modifié pendant le packaging : ${relativeName}`);
   }
 }
 
@@ -127,6 +125,7 @@ for (const [source, packaged, expected, label] of binaryChecks) {
 for (const license of [
   "Slyorrent-LICENSE.txt", "THIRD_PARTY_NOTICES.md", "Transmission-COPYING.txt", "FFmpeg-GPL-3.0.txt",
   "FFmpeg-BUILD.txt", "geoip-lite-and-GeoLite2-LICENSE.txt", "WORLD_GEOMETRY_LICENSE.md",
+  "OpenSSL-LICENSE.txt", "OpenSSL-BUILD.json", "curl-LICENSE.txt", "curl-BUILD.json", "zlib-LICENSE.txt",
 ]) await regularFile(path.join(resources, "licenses", license), `licence ${license}`);
 
 if (errors.length > 0) {

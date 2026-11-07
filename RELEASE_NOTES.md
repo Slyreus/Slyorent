@@ -1,4 +1,4 @@
-Electron passe en 45.2.3, Transmission en 4.1.4 et FFmpeg/FFprobe en 9.0.2. Les dépendances ont été mises à jour. L’audit npm ne signale plus de vulnérabilité, y compris dans les outils de développement. Le paquet officiel de Transmission contient encore OpenSSL 3.5.4 : ce point reste à corriger chez le fournisseur.
+Electron passe en 45.2.3, Transmission en 4.1.4 et FFmpeg/FFprobe en 9.0.2. OpenSSL passe en 3.5.9 et libcurl en 8.23.0, avec une compilation depuis leurs sources officielles et une attestation de provenance. Les DLL Qt inutilisées ont été retirées du moteur. L’audit npm ne signale plus de vulnérabilité, y compris dans les outils de développement.
 
 Protection affiche maintenant chaque problème avec le nom du transfert, la cause et le détail du moteur. On peut ouvrir le transfert, consulter le journal ou relancer le contrôle depuis l’alerte. Un disque plein ou un problème de dossier n’est plus confondu avec une détection antivirus.
 
@@ -8,4 +8,4 @@ Les noms des fichiers restent intacts et le partage attend toujours la vérifica
 
 Pour la mise à jour, ferme Slyorrent et lance `Slyorrent-Setup-1.1.11.exe`. Les torrents, les réglages et le suivi restent en place. FFmpeg, FFprobe et Transmission sont inclus dans le setup.
 
-L’installateur n’est pas encore signé : Windows peut afficher « éditeur inconnu ». Les empreintes sont dans `SHA256SUMS.txt`. Les archives de sources jointes ne sont pas nécessaires à l’installation.
+L’installateur n’est pas encore signé : Windows peut afficher « éditeur inconnu ». Les empreintes sont dans `SHA256SUMS.txt`. Seul le setup est nécessaire ; les autres archives servent à la compilation.

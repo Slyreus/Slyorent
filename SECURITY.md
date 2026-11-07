@@ -12,6 +12,10 @@ La branche 1.x reçoit les corrections de sécurité critiques.
 
 Vérification du 7 novembre 2026 : Electron 45.2.3, Transmission 4.1.4 et FFmpeg/FFprobe 9.0.2. L’audit npm porte sur les dépendances de production et de développement. Il ne couvre pas les bibliothèques intégrées aux exécutables.
 
-Le paquet Windows officiel de Transmission 4.1.4 contient encore OpenSSL 3.5.4, alors que la branche 3.5 a reçu des correctifs depuis. Cette limite reste ouverte côté fournisseur. Les DLL officielles et leurs empreintes sont conservées ensemble ; elles ne sont pas remplacées par celles d’un autre logiciel. Voir les [correctifs OpenSSL 3.5](https://www.openssl-library.org/news/openssl-3.5-notes/index.html).
+Le moteur utilise OpenSSL 3.5.9 et libcurl 8.23.0, compilés depuis les archives officielles vérifiées. Ces versions remplacent OpenSSL 3.5.4 et libcurl 8.16.0 du MSI Transmission. Les empreintes des archives et de chaque DLL sont épinglées. La compilation possède une attestation GitHub liée au code source du workflow. Les recettes sont dans `scripts/build-openssl.ps1` et `scripts/build-curl.ps1`.
+
+OpenSSL ne charge pas automatiquement le fichier global `openssl.cnf`. Le moteur reçoit un environnement réduit, sans variables permettant de désactiver la vérification TLS. Les tests contrôlent la version chargée, une connexion HTTPS locale approuvée et le refus d’un certificat non approuvé. Les DLL Qt inutilisées par le daemon ne sont plus distribuées.
+
+Références : [correctifs OpenSSL 3.5](https://www.openssl-library.org/news/openssl-3.5-notes/index.html), [avis libcurl 8.23.0](https://curl.se/docs/vuln-8.23.0.html). Ces contrôles ne constituent pas une garantie d’absence de faille inconnue.
 
 ESLint reste sur la dernière révision 9.x compatible avec les plugins React et accessibilité du projet. Ce choix concerne les outils de développement ; la version 10 demande leur mise à niveau.

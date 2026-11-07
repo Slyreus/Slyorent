@@ -10,13 +10,14 @@ import test from "node:test";
 import { AuditLog } from "../electron/audit-log.mjs";
 import { TorrentService } from "../electron/torrent-service.mjs";
 import { TransmissionManager } from "../electron/transmission-manager.mjs";
+import { NETWORK_ENGINE_DIRECTORY } from "../electron/network-runtime.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const enginePath = path.join(
   repositoryRoot,
   ".runtime",
   "engine",
-  "transmission-4.1.4",
+  NETWORK_ENGINE_DIRECTORY,
   "PFiles",
   "Transmission",
   "transmission-daemon.exe",

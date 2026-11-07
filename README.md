@@ -2,7 +2,7 @@
 
 J’ai créé Slyorrent pour télécharger et partager mes torrents, puis retrouver mes vidéos au même endroit. C’est une application Windows, avec une médiathèque et un lecteur intégré. Elle fonctionne en local, sans compte ni cloud. Slyorus, le hibou, est la mascotte.
 
-Pour l’installer, prends le setup dans la [dernière release](https://github.com/Slyreus/Slyorent/releases/latest). Lance-le, puis ouvre Slyorrent avec le raccourci du bureau. FFmpeg, FFprobe et Transmission sont déjà inclus. Il n’y a rien à installer en plus. Les archives de sources jointes à la release ne sont pas nécessaires pour utiliser l’application.
+Pour l’installer, prends le setup dans la [dernière release](https://github.com/Slyreus/Slyorent/releases/latest). Lance-le, puis ouvre Slyorrent avec le raccourci du bureau. FFmpeg, FFprobe et Transmission sont déjà inclus. Il n’y a rien à installer en plus. Seul le setup est nécessaire ; les autres archives servent à la compilation.
 
 Il faut Windows 10 ou 11 en 64 bits. L’installateur n’est pas encore signé avec un certificat Authenticode : Windows peut donc afficher « éditeur inconnu ». Le fichier `SHA256SUMS.txt` contient les empreintes de l’installateur et des archives.
 
@@ -26,7 +26,7 @@ La carte P2P est un gadget. Les tirs bleus représentent l’envoi, les rouges l
 
 Les réglages, le suivi de lecture et les journaux restent sur le PC. Il n’y a pas de VPN fourni avec Slyorrent. Comme avec les autres clients torrent, les pairs et les trackers voient l’adresse IP utilisée. Un contrôle BitTorrent valide les pièces reçues, pas la sécurité du contenu, et un antivirus ne garantit pas qu’un fichier est sans risque. Utilise des contenus que tu as le droit de télécharger et de partager. [Données et réseau](PRIVACY.md) donne les détails.
 
-Pour lancer le projet, il faut Windows x64, Node.js 24 et PowerShell 5.1 ou plus récent :
+Pour lancer le projet, il faut Windows x64, Node.js 24, Git et PowerShell 5.1 ou plus récent :
 
 ```powershell
 npm ci

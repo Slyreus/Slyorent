@@ -24,8 +24,9 @@
     "start": "npm run build && electron .",
     "local": "npm run start",
     "engine:install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-engine.ps1",
+    "network:install": "node scripts/install-network.mjs",
     "media:install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-media.ps1",
-    "runtime:install": "npm run engine:install && npm run media:install",
+    "runtime:install": "npm run engine:install && npm run network:install && npm run media:install",
     "icons:build": "node scripts/build-icons.mjs",
     "guard:local": "node scripts/assert-local-only.mjs",
     "guard:public": "node scripts/assert-public-safe.mjs",
@@ -63,7 +64,8 @@
     "globals": "17.14.0",
     "typescript": "6.0.3",
     "typescript-eslint": "8.72.1",
-    "vite": "8.3.6"
+    "vite": "8.3.6",
+    "yauzl": "3.4.0"
   },
   "type": "module",
   "overrides": {

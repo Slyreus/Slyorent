@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -34,6 +35,9 @@ jobs:
       - name: Installer les moteurs vérifiés
         shell: powershell
         run: npm run runtime:install
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SLYORRENT_NETWORK_BOOTSTRAP_RUN: '42413650474'
 
       - name: Auditer les dépendances
         run: npm audit --audit-level=low

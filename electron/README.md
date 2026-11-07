@@ -4,7 +4,7 @@ Le processus principal Electron gère Transmission, les fichiers, les analyses e
 
 La fenêtre utilise le sandbox, `contextIsolation` et `webSecurity`, sans `nodeIntegration`. Les navigations externes, les nouvelles fenêtres et les webviews sont bloquées. Les demandes IPC sont limitées à la fenêtre principale.
 
-Transmission 4.1.4 démarre après vérification des empreintes de son exécutable et des DLL autorisées. Un fichier ajouté ou modifié bloque son lancement. Son API écoute sur `127.0.0.1`, avec des identifiants aléatoires et le contrôle de session Transmission. Le dossier installé conserve son ancien nom pour garder les règles de pare-feu existantes ; la version du binaire reste contrôlée.
+Transmission 4.1.4 démarre après vérification des empreintes de son exécutable et des DLL autorisées : OpenSSL 3.5.9, libcurl 8.23.0 et zlib 1.3.2. Un fichier ajouté ou modifié bloque son lancement. Son API écoute sur `127.0.0.1`, avec des identifiants aléatoires et le contrôle de session Transmission. Le dossier installé conserve son ancien nom pour garder les règles de pare-feu existantes ; la version du binaire reste contrôlée.
 
 Les téléchargements arrivent dans la quarantaine du profil local. Le dossier final vient du sélecteur Windows et reste enregistré dans une politique de stockage. L’interface reçoit un jeton lié à sa fenêtre, pas la possibilité d’ouvrir un chemin arbitraire. La bibliothèque par défaut est `Documents/Slyorrent`.
 

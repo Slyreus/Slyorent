@@ -31,16 +31,14 @@ files:
 extraResources:
   - from: public/slyorrent.ico
     to: slyorrent.ico
-  - from: .runtime/engine/transmission-4.1.4/PFiles/Transmission
+  - from: .runtime/engine/transmission-4.1.4-openssl-3.5.9-curl-8.23.0/PFiles/Transmission
     to: .runtime/engine/transmission-4.1.3/PFiles/Transmission
     filter:
       - transmission-daemon.exe
-      - qt.conf
-      - "*.dll"
-      - imageformats/*.dll
-      - platforms/*.dll
-      - styles/*.dll
-      - tls/*.dll
+      - libcrypto-3-x64.dll
+      - libssl-3-x64.dll
+      - libcurl.dll
+      - z.dll
   - from: .runtime/media/ffmpeg-9.0.2
     to: .runtime/media/ffmpeg-9.0.2
     filter:
@@ -54,6 +52,16 @@ extraResources:
     to: licenses/THIRD_PARTY_NOTICES.md
   - from: third_party/transmission-COPYING.txt
     to: licenses/Transmission-COPYING.txt
+  - from: .runtime/network/openssl-3.5.9/LICENSE.txt
+    to: licenses/OpenSSL-LICENSE.txt
+  - from: .runtime/network/openssl-3.5.9/BUILD.json
+    to: licenses/OpenSSL-BUILD.json
+  - from: .runtime/network/curl-8.23.0/LICENSE.txt
+    to: licenses/curl-LICENSE.txt
+  - from: .runtime/network/curl-8.23.0/ZLIB-LICENSE.txt
+    to: licenses/zlib-LICENSE.txt
+  - from: .runtime/network/curl-8.23.0/BUILD.json
+    to: licenses/curl-BUILD.json
   - from: .runtime/media/ffmpeg-9.0.2/LICENSE.txt
     to: licenses/FFmpeg-GPL-3.0.txt
   - from: .runtime/media/ffmpeg-9.0.2/README.txt

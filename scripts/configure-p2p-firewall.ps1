@@ -4,7 +4,7 @@ param()
 $ErrorActionPreference = 'Stop'
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
-$enginePath = Join-Path $repositoryRoot '.runtime\engine\transmission-4.1.4\PFiles\Transmission\transmission-daemon.exe'
+$enginePath = Join-Path $repositoryRoot '.runtime\engine\transmission-4.1.4-openssl-3.5.9-curl-8.23.0\PFiles\Transmission\transmission-daemon.exe'
 $expectedSha256 = '397DD842BBB4398F0E35A5B299AF19ADD28D8175564017B6F239A855646665BD'
 
 $resolvedEngine = (Resolve-Path -LiteralPath $enginePath).Path
