@@ -26,16 +26,19 @@ Get-Source $curlUrl 'curl.tar.xz' $curlHash
 Get-Source $zlibUrl 'zlib.tar.gz' $zlibHash
 $zlibSource = Join-Path $work 'zlib-1.3.2'
 $zlibBuild = Join-Path $work 'zlib-build'
-& cmake -S $zlibSource -B $zlibBuild -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DZLIB_BUILD_EXAMPLES=OFF
+& cmake -S $zlibSource -B $zlibBuild -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DZLIB_BUILD_TESTING=OFF -DZLIB_BUILD_SHARED=OFF
 if ($LASTEXITCODE -ne 0) { throw 'Configuration zlib impossible.' }
 & cmake --build $zlibBuild --target zlibstatic --parallel 4
 if ($LASTEXITCODE -ne 0) { throw 'Compilation zlib impossible.' }
+$zlibHeaders = Join-Path $work 'zlib-include'
+New-Item -ItemType Directory -Path $zlibHeaders | Out-Null
+Copy-Item -LiteralPath (Join-Path $zlibSource 'zlib.h'), (Join-Path $zlibBuild 'zconf.h') -Destination $zlibHeaders
 $openssl = Join-Path $runtime 'openssl-build\openssl-3.5.9'
 $curlSource = Join-Path $work 'curl-8.23.0'
 $curlBuild = Join-Path $work 'curl-build'
 $configuration = @('-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release', '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded', '-DBUILD_SHARED_LIBS=ON', '-DBUILD_STATIC_LIBS=OFF', '-DBUILD_CURL_EXE=OFF', '-DBUILD_TESTING=OFF', '-DCURL_USE_OPENSSL=ON', '-DCURL_USE_SCHANNEL=OFF', '-DCURL_ZLIB=ON', '-DCURL_BROTLI=OFF', '-DCURL_ZSTD=OFF', '-DUSE_NGHTTP2=OFF', '-DUSE_LIBIDN2=OFF', '-DCURL_USE_LIBPSL=OFF', '-DCURL_USE_LIBSSH2=OFF', '-DCURL_USE_LIBSSH=OFF', '-DCURL_CA_NATIVE=ON', '-DCURL_CA_BUNDLE=none', '-DCURL_CA_PATH=none')
 foreach ($protocol in @('DICT','FILE','FTP','GOPHER','IMAP','LDAP','LDAPS','MQTT','POP3','RTSP','SCP','SFTP','SMB','SMTP','TELNET','TFTP')) { $configuration += "-DCURL_DISABLE_$protocol=ON" }
-$configuration += "-DOPENSSL_INCLUDE_DIR=$openssl/include", "-DOPENSSL_SSL_LIBRARY=$openssl/libssl.lib", "-DOPENSSL_CRYPTO_LIBRARY=$openssl/libcrypto.lib", "-DZLIB_INCLUDE_DIR=$zlibSource;$zlibBuild", "-DZLIB_LIBRARY=$zlibBuild/zlibstatic.lib"
+$configuration += "-DOPENSSL_INCLUDE_DIR=$openssl/include", "-DOPENSSL_SSL_LIBRARY=$openssl/libssl.lib", "-DOPENSSL_CRYPTO_LIBRARY=$openssl/libcrypto.lib", "-DZLIB_INCLUDE_DIR=$zlibHeaders", "-DZLIB_LIBRARY=$zlibBuild/zs.lib"
 & cmake -S $curlSource -B $curlBuild @configuration
 if ($LASTEXITCODE -ne 0) { throw 'Configuration curl impossible.' }
 & cmake --build $curlBuild --parallel 4
