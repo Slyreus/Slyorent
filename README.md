@@ -20,7 +20,7 @@ Certains formats, comme le HEVC ou le son E-AC3, demandent une conversion pour l
 
 Pour le partage, tu peux définir des paramètres globaux, garder des limites par torrent ou tout arrêter. Le volume envoyé est affiché en plus du ratio. Le diagnostic permet de vérifier le port, les trackers et les connexions. Le moteur est Transmission 4.1.4 : le débit dépend aussi de la demande et des autres pairs. Aucun client ne peut garantir du partage ou des points sur un tracker.
 
-L’onglet Protection détaille chaque alerte : le transfert concerné, la cause et le message du moteur. Un manque de place ou un chemin trop long se distingue d’un fichier signalé par l’antivirus. Les dossiers ajoutés par Slyorrent sont raccourcis si nécessaire pour respecter la limite Windows, sans renommer les fichiers du torrent.
+L’onglet Protection détaille chaque alerte : le transfert concerné, la cause et le message du moteur. Un manque de place ou un chemin trop long se distingue d’un fichier signalé par l’antivirus. Les dossiers ajoutés par Slyorrent sont raccourcis quand c’est possible. Les chemins qui restent longs passent par le moteur de fichiers local, sans renommer les fichiers du torrent. Un contrôle en échec attend une relance manuelle.
 
 La carte P2P est un gadget. Les tirs bleus représentent l’envoi, les rouges la réception, avec une intensité liée au débit. Les pairs sont réels, leurs positions approximatives. Ce n’est pas le trajet exact des données.
 

@@ -10,6 +10,8 @@ Les téléchargements arrivent dans la quarantaine du profil local. Le dossier f
 
 `verifyAndScan()` arrête le torrent, révoque les accès média, attend la fin de la vérification BitTorrent puis analyse les fichiers avec Defender. Après réussite, les données rejoignent le dossier final. Un registre signé par HMAC conserve leur emplacement et les métadonnées contrôlées. La validation est revérifiée au redémarrage.
 
+Pour les chemins Windows de plus de 259 caractères, le rangement local crée les fichiers sans écraser de cible. Sur le même volume, des liens physiques temporaires évitent de recopier les données. Entre volumes, les copies sont contrôlées par SHA-256. Les originaux ne sont retirés qu’après confirmation du nouvel emplacement par Transmission. Un échec reste bloqué, avec son motif affiché, jusqu’à une relance manuelle.
+
 Les URL `secutorrent-media://` sont temporaires et réservées à leur fenêtre. La lecture exige un fichier complet, validé, sous un chemin autorisé et avec une signature média reconnue. Sa taille et sa date de modification sont contrôlées avant ouverture. Révoquer un accès coupe aussi les flux ouverts.
 
 FFmpeg et FFprobe 9.0.2 inspectent les pistes et préparent les copies compatibles H.264/AAC. Les pistes audio peuvent être sélectionnées et les sous-titres texte sont extraits en WebVTT. Les dialogues passent dans le lecteur sans charger de polices, de styles ASS ni de ressources externes. Les conversions sont mises en cache et analysées par Defender. Les versions et empreintes des moteurs sont dans `media-binaries.mjs` et [THIRD_PARTY_MEDIA.md](THIRD_PARTY_MEDIA.md).

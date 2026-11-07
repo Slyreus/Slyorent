@@ -7,7 +7,8 @@ import { locateSelfWithWindows } from "./local-location.mjs";
 import { assertSafeMagnetNetworkTargets, assertSafeTrackerUrls, inspectMagnet } from "./magnet-security.mjs";
 import { isMediaName, validateMediaSignature } from "./media-vault.mjs";
 import { PeerTelemetry } from "./peer-telemetry.mjs";
-import { assertLibraryPathBudget, libraryFolderName } from "./library-destination.mjs";
+import { assertLibraryPathBudget, libraryFolderName, requiresLocalLibraryMove } from "./library-destination.mjs";
+import { stageLibraryFiles } from "./library-file-move.mjs";
 
 const MAX_TORRENT_FILE_SIZE = 10 * 1024 * 1024;
 const MAX_FILES_PER_TORRENT = 10_000;
@@ -521,6 +522,7 @@ export class TorrentService {
           hash,
           blockedAt: typeof entry.blockedAt === "string" && Number.isFinite(Date.parse(entry.blockedAt)) ? entry.blockedAt : new Date(0).toISOString(),
           reason: new Set(["scan-pending", "scan-failed"]).has(entry.reason) ? entry.reason : "scan-failed",
+          errorMessage: safeName(entry.errorMessage || "", ""),
         });
       }
       this.#sharingQuarantine = next;
@@ -549,10 +551,10 @@ export class TorrentService {
     return this.#sharingQuarantine.has(this.#sharingHash(torrentOrHash));
   }
 
-  async #blockSharing(hash, reason) {
+  async #blockSharing(hash, reason, error = null) {
     const normalized = this.#sharingHash(hash);
     if (!normalized) throw new Error("Infohash invalide pour la quarantaine de partage.");
-    this.#sharingQuarantine.set(normalized, { hash: normalized, blockedAt: new Date().toISOString(), reason: reason === "scan-pending" ? "scan-pending" : "scan-failed" });
+    this.#sharingQuarantine.set(normalized, { hash: normalized, blockedAt: new Date().toISOString(), reason: reason === "scan-pending" ? "scan-pending" : "scan-failed", errorMessage: error ? safeName(error.message, "Le contrôle a échoué.") : "" });
     this.#mediaVault.revokeTorrent(normalized);
     await this.#writeSharingQuarantine();
   }
@@ -1033,7 +1035,7 @@ export class TorrentService {
       peersConnected: Number(torrent.peers_connected || 0),
       peersGettingFromUs: Number(torrent.peers_getting_from_us || 0),
       peersSendingToUs: Number(torrent.peers_sending_to_us || 0),
-      errorString: safeName(torrent.error_string || "", ""),
+      errorString: safeName(torrent.error_string || this.#sharingQuarantine.get(this.#sharingHash(torrent))?.errorMessage || "", ""),
       isPrivate: Boolean(torrent.is_private),
       uploadLimited: Boolean(torrent.upload_limited),
       uploadLimitKbps: Number(torrent.upload_limit || 0),
@@ -1280,11 +1282,17 @@ export class TorrentService {
 
   async #moveToLibrary(raw, plan) {
     const destination = await this.#prepareFinalDirectory(raw, plan);
+    let localMove = null;
     if (!samePath(raw.download_dir, destination)) {
-      await this.#manager.rpc.call("torrent_set_location", { ids: [Number(raw.id)], location: destination, move: true });
+      if (requiresLocalLibraryMove(destination, raw.files || [])) {
+        localMove = await stageLibraryFiles({ destination, files: await this.#safeFileSnapshot(raw) });
+        for (const file of localMove.files) this.#scanRecords.set(this.#scanKey(raw.hash_string, file.index), { status: "clean", ...file });
+      }
+      await this.#manager.rpc.call("torrent_set_location", { ids: [Number(raw.id)], location: destination, move: !localMove });
       await this.#audit.append("torrent.library_move_started", { torrentId: Number(raw.id), createSubfolder: plan.createSubfolder === true });
     }
     const moved = await this.#waitForLocation(Number(raw.id), destination, raw.error_string || "");
+    if (localMove) await localMove.removeSources();
     await this.#audit.append("torrent.library_move_complete", { torrentId: Number(raw.id) });
     return moved;
   }
@@ -1297,7 +1305,9 @@ export class TorrentService {
       const file = raw.files[index];
       const filePath = await resolveSafeTorrentFile(allowedRoot, raw.download_dir, file.name);
       const current = await stat(filePath);
-      if (current.size !== Number(file.length) || Number(file.bytes_completed) !== Number(file.length)) {
+      const scanned = this.#scanRecords.get(this.#scanKey(raw.hash_string, index));
+      if (current.size !== Number(file.length) || Number(file.bytes_completed) !== Number(file.length)
+        || scanned?.status !== "clean" || scanned.size !== current.size || scanned.mtimeMs !== current.mtimeMs) {
         throw new Error("Un fichier a changé pendant son déplacement vers la bibliothèque.");
       }
       files.push({ index, name: file.name, size: current.size, mtimeMs: current.mtimeMs, filePath });
@@ -1395,6 +1405,7 @@ export class TorrentService {
     } catch (error) {
       if (validationStarted) {
         await this.#manager.rpc.call("torrent_stop", { ids: [id] }).catch(() => undefined);
+        if (!repairRequired && raw) await this.#blockSharing(raw.hash_string, "scan-failed", error).catch(() => undefined);
         await this.#audit.append("torrent.validation_failed", {
           torrentId: id,
           phase: repairRequired ? "verification-incomplete" : "verification-or-scan",

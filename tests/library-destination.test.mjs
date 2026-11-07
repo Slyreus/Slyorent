@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
-import { assertLibraryPathBudget, libraryFolderName } from "../electron/library-destination.mjs";
+import { assertLibraryPathBudget, libraryFolderName, requiresLocalLibraryMove } from "../electron/library-destination.mjs";
 import { protectionAlerts } from "../lib/protection-alerts.ts";
 
 test("raccourcir le dossier ajouté sans renommer les fichiers du torrent", () => {
@@ -15,7 +15,10 @@ test("raccourcir le dossier ajouté sans renommer les fichiers du torrent", () =
     assert.ok(path.win32.join(root, folder, files[0].name).length <= 259);
   }
   assert.deepEqual(files, original);
-  assert.throws(() => libraryFolderName({ ...options, root: `C:\\${"racine".repeat(35)}` }), { code: "DESTINATION_PATH_TOO_LONG" });
+  const longRoot = `C:\\${"racine".repeat(35)}`;
+  const longFolder = libraryFolderName({ ...options, root: longRoot });
+  assert.equal(requiresLocalLibraryMove(path.win32.join(longRoot, longFolder), files, "win32"), true);
+  assert.throws(() => assertLibraryPathBudget(root, [{ name: "a".repeat(256) }], "win32"), { code: "DESTINATION_PATH_TOO_LONG" });
   assert.throws(() => assertLibraryPathBudget(root, [{ name: "../fichier.mkv" }], "win32"), /interdit/u);
   assert.equal(libraryFolderName({ ...options, name: "Serie Test", files: [{ name: "episode.mkv" }] }), "Serie Test");
 });

@@ -366,6 +366,40 @@ test("un téléchargement reste réciproque, puis s'arrête et ne seed qu'après
   );
 });
 
+test("afficher un échec de rangement et attendre une relance manuelle, même après redémarrage", async t => {
+  const root = await mkdtemp(path.join(await realpath(os.tmpdir()), "slyorrent-move-failure-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const quarantine = path.join(root, "quarantine"), library = path.join(root, "library"), profile = path.join(root, "profile");
+  await Promise.all([quarantine, library, profile].map(directory => mkdir(directory)));
+  const timeline = [], { manager, state } = localManager({ quarantine, library, profile, timeline });
+  const registry = new ContentRegistry(path.join(profile, "content-security"));
+  const scanFile = async filePath => { const info = await stat(filePath); return { size: info.size, mtimeMs: info.mtimeMs }; };
+  const service = serviceWith({ manager, registry, timeline, scanFile });
+  await service.initializeSecurity();
+  await service.addMagnet({ magnet: MAGNET, rightsConfirmed: true, startPaused: true, destination: { libraryRoot: library, createSubfolder: true } });
+  await service.initializeSharing();
+  await writeFile(path.join(quarantine, "episode-01.mkv"), "safe");
+  Object.assign(state.torrents[0], { percent_done: 1, files: [{ name: "episode-01.mkv", length: 4, bytes_completed: 4 }] });
+  const originalCall = manager.rpc.call;
+  let refuse = true;
+  manager.rpc.call = async (method, params) => {
+    if (method === "torrent_set_location" && refuse) { refuse = false; throw Object.assign(new Error("No space left on device"), { code: "ENOSPC" }); }
+    return originalCall(method, params);
+  };
+  await assert.rejects(service.maintainValidation(), { code: "ENOSPC" });
+  assert.match((await service.list())[0].errorString, /No space/u);
+  assert.equal((await service.maintainValidation()).checked, false);
+  const restored = serviceWith({ manager, registry: new ContentRegistry(path.join(profile, "content-security")), timeline, scanFile });
+  await restored.initializeSecurity();
+  await restored.initializeSharing();
+  assert.equal((await restored.maintainValidation()).checked, false);
+  assert.match((await restored.list())[0].errorString, /No space/u);
+  const repaired = await restored.verifyAndScan(1);
+  assert.equal(repaired.moved, true);
+  assert.equal(repaired.torrent.errorString, "");
+  assert.equal((await restored.list())[0].sharingBlocked, false);
+});
+
 test("la garde de fin restaure la politique individuelle après validation", async (t) => {
   const temporaryRoot = await realpath(os.tmpdir());
   const root = await realpath(await mkdtemp(path.join(temporaryRoot, "slyorent-individual-guard-")));
