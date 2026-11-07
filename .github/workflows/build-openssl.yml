@@ -1,0 +1,31 @@
+name: Compiler OpenSSL
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Compiler les sources officielles
+        shell: pwsh
+        run: ./scripts/build-openssl.ps1
+      - name: Attester la provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: .runtime/artifacts/OpenSSL-3.5.9-windows-x64.zip
+      - name: Conserver les bibliothèques
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: OpenSSL-3.5.9-windows-x64
+          path: .runtime/artifacts/OpenSSL-3.5.9-windows-x64.zip
+          if-no-files-found: error
+          retention-days: 90
