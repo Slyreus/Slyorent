@@ -16,7 +16,7 @@ const enginePath = path.join(
   repositoryRoot,
   ".runtime",
   "engine",
-  "transmission-4.1.3",
+  "transmission-4.1.4",
   "PFiles",
   "Transmission",
   "transmission-daemon.exe",
@@ -90,7 +90,7 @@ test("le moteur local signé démarre et répond en JSON-RPC sur son profil isol
   const status = await manager.start();
   assert.equal(status.running, true);
   assert.equal(status.rpcReady, true);
-  assert.match(status.version, /^4\.1\.3/u);
+  assert.match(status.version, /^4\.1\.4/u);
   assert.equal(status.portMapping, false);
   await assertSameRealPath(status.quarantineDir, manager.paths.data);
   await assertSameRealPath(status.downloadDir, defaultLibrary);
@@ -126,7 +126,7 @@ test("le moteur local signé démarre et répond en JSON-RPC sur son profil isol
 
   const session = await manager.rpc.call("session_get", { fields: ["rpc_version_semver", "version"] });
   assert.match(session.rpc_version_semver, /^6\./u);
-  assert.match(session.version, /^4\.1\.3/u);
+  assert.match(session.version, /^4\.1\.4/u);
 
   const settings = JSON.parse(await readFile(path.join(manager.paths.profile, "settings.json"), "utf8"));
   assert.equal(settings["rpc-bind-address"], "127.0.0.1");

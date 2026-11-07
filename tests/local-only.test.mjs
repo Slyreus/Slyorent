@@ -81,7 +81,7 @@ test("l'installation du moteur reste locale et vérifie version, hash et signatu
   const installer = await readFile(path.join(repositoryRoot, "scripts", "install-engine.ps1"), "utf8");
   const manager = await readFile(path.join(repositoryRoot, "electron", "transmission-manager.mjs"), "utf8");
 
-  assert.match(installer, /TransmissionVersion\s*=\s*'4\.1\.3'/u);
+  assert.match(installer, /TransmissionVersion\s*=\s*'4\.1\.4'/u);
   assert.match(installer, /TransmissionSha256\s*=\s*'[a-f0-9]{64}'/u);
   assert.match(installer, /Assert-Sha256\s+-Path\s+\$partialPath/u);
   assert.match(installer, /Assert-Authenticode\s+-Path\s+\$partialPath/u);

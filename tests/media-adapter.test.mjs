@@ -4,8 +4,7 @@ import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promise
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import ffmpegPath from "ffmpeg-static";
-import ffprobePath from "@derhuerst/ffprobe-static";
+import { ffmpegPath, ffprobePath } from "../electron/media-binaries.mjs";
 import test from "node:test";
 import { analyzeProbe, MediaAdapter } from "../electron/media-adapter.mjs";
 
@@ -98,8 +97,8 @@ test("préparer une source HEVC HDR en H264 SDR", { timeout: 90_000 }, async () 
   try {
     const sourcePath = path.join(root, "hdr.mkv");
     await execFileAsync(ffmpegPath, ["-nostdin", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=s=320x180:r=24:d=1",
-      "-c:v", "libx265", "-preset", "ultrafast", "-pix_fmt", "yuv420p10le", "-x265-params", "pools=1:frame-threads=1:log-level=error",
-      "-color_primaries", "bt2020", "-color_trc", "smpte2084", "-colorspace", "bt2020nc", sourcePath], { windowsHide: true, timeout: 30_000 });
+      "-c:v", "libx265", "-preset", "ultrafast", "-pix_fmt", "yuv420p10le", "-x265-params", "pools=1:frame-threads=1:log-level=error:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc",
+      sourcePath], { windowsHide: true, timeout: 30_000 });
     const source = await stat(sourcePath);
     const adapter = await new MediaAdapter({ cacheDirectory: path.join(root, "cache"), hardwareAcceleration: false }).initialize();
     const result = await adapter.prepare({ sourcePath, sourceSize: source.size, sourceMtimeMs: source.mtimeMs });

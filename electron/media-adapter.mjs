@@ -1,5 +1,4 @@
-import ffmpegPackagePath from "ffmpeg-static";
-import ffprobePackagePath from "@derhuerst/ffprobe-static";
+import { ffmpegPath as ffmpegPackagePath, ffprobePath as ffprobePackagePath, MEDIA_SHA256 } from "./media-binaries.mjs";
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { lstat, mkdir, readdir, rename, stat, statfs, unlink } from "node:fs/promises";
@@ -13,8 +12,8 @@ import { adaptationBudget, analyzeProbe, audioLanguage, conversionVideoArgs, loc
 import { cleanWebVtt, MAX_SUBTITLE_BYTES } from "./subtitles.mjs";
 export { analyzeProbe } from "./media-profile.mjs";
 
-const FFMPEG_SHA256 = "04e1307997530f9cf2fe35cba2ca7e8875ca91da02f89d6c7243df819c94ad00";
-const FFPROBE_SHA256 = "3a7e2dc003dc2cd1472827e4c7c4f056ae1ae0ae7c5bbc580c99b49827351ba4";
+const FFMPEG_SHA256 = MEDIA_SHA256.ffmpeg;
+const FFPROBE_SHA256 = MEDIA_SHA256.ffprobe;
 const MAX_PROBE_OUTPUT = 512 * 1024;
 const MAX_DIAGNOSTIC_OUTPUT = 64 * 1024;
 const MAX_CACHE_BYTES = 12 * 1024 * 1024 * 1024;

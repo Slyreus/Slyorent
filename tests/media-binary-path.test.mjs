@@ -2,6 +2,14 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
 import { resolveMediaBinaryPath } from "../electron/media-binary-path.mjs";
+import { mediaPathsForApp } from "../electron/media-binaries.mjs";
+
+test("les moteurs récents restent limités au runtime fourni avec l’application", () => {
+  const application = path.resolve("local-app", "resources", "app.asar");
+  for (const executable of Object.values(mediaPathsForApp(application))) assert.equal(resolveMediaBinaryPath(executable, application), executable);
+  const sibling = path.join(path.dirname(mediaPathsForApp(application).ffmpeg), "autre.exe");
+  assert.throws(() => resolveMediaBinaryPath(sibling, application), /fourni avec l'application/u);
+});
 
 test("le moteur média de développement conserve son chemin physique", () => {
   const application = path.resolve("local-app");

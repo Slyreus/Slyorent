@@ -18,17 +18,17 @@ if ($PSVersionTable.PSEdition -eq 'Desktop') {
     Import-Module (Join-Path $trustedModuleRoot 'Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1') -Force -ErrorAction Stop
 }
 
-$TransmissionVersion = '4.1.3'
+$TransmissionVersion = '4.1.4'
 $TransmissionAsset = "transmission-$TransmissionVersion-x64.msi"
 $TransmissionUri = "https://github.com/transmission/transmission/releases/download/$TransmissionVersion/$TransmissionAsset"
-$TransmissionSha256 = 'c8ea492d8f46fadac26e0c05b244cabba556201d5fe348dfcf1cf036621741f8'
+$TransmissionSha256 = 'cf51e5772f39a3ead3c8f763b689399b9b4b8b016a4c0ca68ab5d6c634be2e1c'
 $ExpectedSigner = 'SignPath Foundation'
 
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
     throw 'Cet installateur local du moteur est reserve a Windows.'
 }
 if (-not [Environment]::Is64BitOperatingSystem) {
-    throw 'Transmission 4.1.3 x64 exige une edition 64 bits de Windows.'
+    throw 'Transmission 4.1.4 x64 exige une edition 64 bits de Windows.'
 }
 
 $RepositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -152,7 +152,7 @@ function Assert-EnginePayload {
     foreach ($tool in $signedTools) {
         $productVersion = $tool.VersionInfo.ProductVersion
         if ([string]::IsNullOrWhiteSpace($productVersion) -or
-            $productVersion -notmatch '^4\.1\.3(?:\s|\(|$)') {
+            $productVersion -notmatch '^4\.1\.4(?:\s|\(|$)') {
             throw "Version inattendue pour $($tool.Name) : $productVersion"
         }
         $null = Assert-Authenticode -Path $tool.FullName

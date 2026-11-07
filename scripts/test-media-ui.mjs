@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import { build } from "vite";
 import react from "@vitejs/plugin-react";
 import electron from "electron";
-import ffmpeg from "ffmpeg-static";
+import { ffmpegPath as ffmpeg } from "../electron/media-binaries.mjs";
 
 const execute = promisify(execFile);
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");

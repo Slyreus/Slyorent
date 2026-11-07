@@ -6,29 +6,31 @@ import path from "node:path";
 import { TransmissionRpcClient } from "./transmission-rpc.mjs";
 import { canonicalPathWithoutLinks, UnsafePathError } from "./safe-path.mjs";
 
-const EXPECTED_DAEMON_SHA256 = "397dd842bbb4398f0e35a5b299af19add28d8175564017b6f239a855646665bd";
-const ENGINE_RELATIVE_PATH = path.join(".runtime", "engine", "transmission-4.1.3", "PFiles", "Transmission", "transmission-daemon.exe");
+const EXPECTED_DAEMON_SHA256 = "1ce3ebd74e4067962bfd04e8cbe6c891ec8f12d64bcc2dc908762520fc2a8816";
+const ENGINE_RELATIVE_PATH = path.join(".runtime", "engine", "transmission-4.1.4", "PFiles", "Transmission", "transmission-daemon.exe");
+// Conserver le chemin installé pour préserver les autorisations réseau existantes.
+const PACKAGED_ENGINE_RELATIVE_PATH = path.join(".runtime", "engine", "transmission-4.1.3", "PFiles", "Transmission", "transmission-daemon.exe");
 const STORAGE_POLICY_SCHEMA_VERSION = 1;
 const MAX_ALLOWED_DOWNLOAD_DIRECTORIES = 32;
 const EXPECTED_ENGINE_DLLS = Object.freeze({
   "dbus-1.dll": "48f5d441e8fca6878817f2fe1a1bb62eec36aedab1ec238670d07d85efb335be",
-  "imageformats/qgif.dll": "62bf09be7a1eafb725857fa2b21792afd57796e77a6e705d1e32f1ab81428395",
-  "imageformats/qico.dll": "e7150d59d0fdbfb0bf9dc2fe07bcf547323792bcc9a69047955781864bc5b6e7",
-  "imageformats/qjpeg.dll": "db71aa33d0a91ed35e7bf9b48a860ac018cc7c5774c931f30e69be33e3baa96d",
-  "imageformats/qsvg.dll": "f20bdb24204de9965c513c37e569cf2b4edc3b14e73194b83372c0d7b30256bc",
+  "imageformats/qgif.dll": "8eb323e9a8707dc7864d658973b59f522cc42d34b1b6e1ceecb187498ff1a1d9",
+  "imageformats/qico.dll": "fb1f33e3d959d98c4a4985bad7c85319978c78f8170c630d436ac55cec4aa28a",
+  "imageformats/qjpeg.dll": "f87e5632c67cb05be34fbf74bbd99f66c189b8c725fcf7d7d5ed59e6f56f136b",
+  "imageformats/qsvg.dll": "f20b52ee9499adea29d06e2f2ce494b713bb0c59d23f1da93601316c11798144",
   "libcrypto-3-x64.dll": "dadd54776f7dead0130acf18938cbdc89bdfa7e4d036d66aa735a24ab84e877e",
-  "libcurl.dll": "bd47510f26da03bf9f55d27d03d54ae7ebac7f444c3f05169bf9aa3837f3594a",
+  "libcurl.dll": "d4355ef95608f08f21892bf2dbf0acc5618517882a02533a36123612879e1bcf",
   "libssl-3-x64.dll": "537170dc0cdf023437bea8d59d298823d60bca200e1d70be85f2a1da3dfd4d55",
-  "platforms/qwindows.dll": "677232212542506f8838ecd05d4be4d718346e1bad911025ae41a518a7e7b1a4",
-  "qt6core.dll": "1943159265d9c989e5607de1aac2495cc4f46dea8566b374da18c661b6de278d",
-  "qt6dbus.dll": "4c9b09b845e0cf67fa1f927629ba21b267e0de29e33907ef5029a78ec3d1642b",
-  "qt6gui.dll": "bfb50c4d1dbd60a01c9088487fe79d749e1d3a2bb131fef3df33cad1b453fc51",
-  "qt6network.dll": "9ca377a5cd20a70d2c6f082ba73b27d1e4f049e8ae058a0d61eef33025e5b90f",
-  "qt6svg.dll": "1a4bc8a7cd46b4636aef746a50285dab5b5b81fbe8494dceaab02af45ca475e9",
-  "qt6widgets.dll": "fd0306ec97f4b46e5c1b20e29aa26c9672ab5235d9182fb358b7ba19579bd4dc",
-  "styles/qmodernwindowsstyle.dll": "3248422614952a17127aa3634d0628248c6bb377cd82cbe083514569a6743c4a",
-  "tls/qopensslbackend.dll": "1e14c826e348083ee07007cf8d913fac4e9db966a969be82af4695fa2668f28d",
-  "zlib.dll": "536c6fc588a549f024a715ea250b0f3bfa038d3912b831594bb527cb6e5a1720",
+  "platforms/qwindows.dll": "2b294fedd287b67aa05ca91b6bc9acebf72663d46fc410faa6d0cc9602a255c9",
+  "qt6core.dll": "3f2c6985d89e3aa71088943f2cc981a56ff0465eeb0147698c426269669f1129",
+  "qt6dbus.dll": "8e7d7c11cfd96105f3b44dfb89c2814958bcf8cf7c52db192bd26d4be0b3b3c0",
+  "qt6gui.dll": "f57bd1f1b9beb9f0341b36dc42fdb5c317afb32a2f97b8a8d9695e300f6b7fe7",
+  "qt6network.dll": "be301be57cc0597043c48535718d72d311478b0e57ac8261eb22e251c15a0506",
+  "qt6svg.dll": "61e40328f42a7c0d00ee2ebb94f43e9e27308d526fad7b00ea5246fe8f4207b6",
+  "qt6widgets.dll": "fc2c414c3aa26b551fc89a5bbc8f306635710123a747c2579da6830fcc181279",
+  "styles/qmodernwindowsstyle.dll": "58944f31d7215a742dacf24c397acc8cceba43f96b56b648cdb53915a9d2e4e5",
+  "tls/qopensslbackend.dll": "7634c6104c1435c5e1377f65748317fc5341dcb87f8759b276b65db7f00ab825",
+  "z.dll": "11d13bd3c0e711cb00f7de24ef2c9c8034b4c8a149c71f52f2ab05900d24cf5c",
 });
 
 function randomCredential(prefix) {
@@ -311,7 +313,7 @@ export class TransmissionManager {
   async #resolveAndVerifyEngine() {
     const candidates = [
       path.join(this.#appPath, ENGINE_RELATIVE_PATH),
-      path.join(process.resourcesPath || "", ENGINE_RELATIVE_PATH),
+      path.join(process.resourcesPath || "", PACKAGED_ENGINE_RELATIVE_PATH),
       path.join(process.cwd(), ENGINE_RELATIVE_PATH),
     ];
     for (const candidate of [...new Set(candidates)]) {
@@ -333,7 +335,7 @@ export class TransmissionManager {
       await verifyEngineDlls(path.dirname(resolved));
       return resolved;
     }
-    throw new Error(`Transmission 4.1.3 est introuvable dans ${ENGINE_RELATIVE_PATH}.`);
+    throw new Error(`Transmission 4.1.4 est introuvable dans ${ENGINE_RELATIVE_PATH}.`);
   }
 
   async start() {
@@ -462,7 +464,7 @@ export class TransmissionManager {
     try {
       const session = await this.#rpc.waitUntilReady({ timeoutMs: 20_000 });
       if (!String(session.rpc_version_semver || "").startsWith("6.")) throw new Error(`Version RPC Transmission incompatible: ${session.rpc_version_semver || "inconnue"}.`);
-      if (!String(session.version || "").startsWith("4.1.3")) throw new Error(`Version Transmission inattendue: ${session.version || "inconnue"}.`);
+      if (!String(session.version || "").startsWith("4.1.4")) throw new Error(`Version Transmission inattendue: ${session.version || "inconnue"}.`);
       this.#version = session.version;
       this.#rpcVersion = session.rpc_version_semver;
       this.#rpcReady = true;

@@ -1,9 +1,9 @@
-L’enchaînement des épisodes sur Google Cast tient compte du signal de fin envoyé par la TV, même lorsque la session de lecture disparaît juste après. Le suivant démarre sans attendre une commande de pause sur l’épisode terminé.
+Electron passe en 45.2.3, Transmission en 4.1.4 et FFmpeg/FFprobe en 9.0.2. Les dépendances ont été mises à jour. L’audit npm ne signale plus de vulnérabilité, y compris dans les outils de développement. Le paquet officiel de Transmission contient encore OpenSSL 3.5.4 : ce point reste à corriger chez le fournisseur.
 
-Un arrêt depuis la télé, une erreur de lecture ou un changement de contenu ne sont pas pris pour une fin d’épisode. Les anciens messages ne font pas sauter un épisode de la file.
+Protection affiche maintenant chaque problème avec le nom du transfert, la cause et le détail du moteur. On peut ouvrir le transfert, consulter le journal ou relancer le contrôle depuis l’alerte. Un disque plein ou un problème de dossier n’est plus confondu avec une détection antivirus.
 
-Le journal indique la fin de chaque épisode et si l’enchaînement automatique est activé. Les liens du flux et les clés d’accès n’y figurent pas.
+Les longs noms de torrents pouvaient bloquer le déplacement après téléchargement avec l’erreur Windows 206. Le dossier ajouté par Slyorrent est désormais raccourci quand c’est nécessaire. Les noms des fichiers restent intacts et le partage attend toujours la vérification et le scan Defender. La conversion HDR vers SDR conserve aussi les bonnes informations de couleur avec le nouveau moteur média.
 
-Pour la mise à jour, ferme Slyorrent et lance `Slyorrent-Setup-1.1.10.exe`. Les torrents, les réglages et le suivi restent en place. FFmpeg, FFprobe et Transmission sont inclus dans le setup.
+Pour la mise à jour, ferme Slyorrent et lance `Slyorrent-Setup-1.1.11.exe`. Les torrents, les réglages et le suivi restent en place. FFmpeg, FFprobe et Transmission sont inclus dans le setup.
 
 L’installateur n’est pas encore signé : Windows peut afficher « éditeur inconnu ». Les empreintes sont dans `SHA256SUMS.txt`. Les archives de sources jointes ne sont pas nécessaires à l’installation.

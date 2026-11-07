@@ -10,7 +10,7 @@ const INPUT_FORMATS = new Map([
   [".mp4", "mov"], [".m4v", "mov"], [".m4a", "mov"],
 ]);
 
-export const MEDIA_CACHE_PROFILE = "compatible-mp4-v2";
+export const MEDIA_CACHE_PROFILE = "compatible-mp4-v3";
 export const audioLanguage = (stream) => String(stream?.tags?.language || "und").trim().toLowerCase();
 
 export function localMediaInputArgs(sourcePath) {
@@ -78,6 +78,7 @@ export function conversionVideoArgs(analysis, encoder, threads) {
     ? "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p"
     : "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p";
   if (analysis.cast) filters += ",scale=w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,fps=30";
+  if (hdr) filters += ",setparams=range=limited:color_primaries=bt709:color_trc=bt709:colorspace=bt709";
   return ["-c:v", encoder, ...(encoder === "h264_nvenc"
     ? ["-preset", "p4", "-rc", "vbr", "-cq", "20", "-b:v", "0"]
     : ["-preset", "veryfast", "-crf", "20", "-threads", String(threads)]),

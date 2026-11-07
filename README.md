@@ -18,7 +18,9 @@ Le bouton Caster permet de lancer la vidéo sur un Chromecast, une Google TV ou 
 
 Certains formats, comme le HEVC ou le son E-AC3, demandent une conversion pour le lecteur. Elle se fait sur le PC, sans modifier l’original. La première lecture peut prendre quelques minutes ; les suivantes réutilisent la copie en cache. Une carte NVIDIA compatible peut accélérer la conversion. Le cache est limité à 12 Go et les copies passent aussi par Defender.
 
-Pour le partage, tu peux définir des paramètres globaux, garder des limites par torrent ou tout arrêter. Le volume envoyé est affiché en plus du ratio. Le diagnostic permet de vérifier le port, les trackers et les connexions. Le moteur est Transmission 4.1.3 : le débit dépend aussi de la demande et des autres pairs. Aucun client ne peut garantir du partage ou des points sur un tracker.
+Pour le partage, tu peux définir des paramètres globaux, garder des limites par torrent ou tout arrêter. Le volume envoyé est affiché en plus du ratio. Le diagnostic permet de vérifier le port, les trackers et les connexions. Le moteur est Transmission 4.1.4 : le débit dépend aussi de la demande et des autres pairs. Aucun client ne peut garantir du partage ou des points sur un tracker.
+
+L’onglet Protection détaille chaque alerte : le transfert concerné, la cause et le message du moteur. Un manque de place ou un chemin trop long se distingue d’un fichier signalé par l’antivirus. Les dossiers ajoutés par Slyorrent sont raccourcis si nécessaire pour respecter la limite Windows, sans renommer les fichiers du torrent.
 
 La carte P2P est un gadget. Les tirs bleus représentent l’envoi, les rouges la réception, avec une intensité liée au débit. Les pairs sont réels, leurs positions approximatives. Ce n’est pas le trajet exact des données.
 
@@ -28,7 +30,7 @@ Pour lancer le projet, il faut Windows x64, Node.js 24 et PowerShell 5.1 ou plus
 
 ```powershell
 npm ci
-npm run engine:install
+npm run runtime:install
 npm run local
 ```
 

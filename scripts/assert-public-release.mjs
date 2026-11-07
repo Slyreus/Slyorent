@@ -6,12 +6,13 @@ import { promisify } from "node:util";
 import { extractFile, listPackage } from "@electron/asar";
 import { NtExecutable, NtExecutableResource, Resource } from "resedit";
 import { inspectWindowsIco } from "./icon-resources.mjs";
+import { mediaPathsForApp, MEDIA_SHA256 } from "../electron/media-binaries.mjs";
 
 const root = path.resolve(process.argv[2] || ".");
 const expectedPackage = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
 const resources = path.join(root, "release", "win-unpacked", "resources");
 const asarPath = path.join(resources, "app.asar");
-const engineSource = path.join(root, ".runtime", "engine", "transmission-4.1.3", "PFiles", "Transmission");
+const engineSource = path.join(root, ".runtime", "engine", "transmission-4.1.4", "PFiles", "Transmission");
 const enginePackaged = path.join(resources, ".runtime", "engine", "transmission-4.1.3", "PFiles", "Transmission");
 const errors = [];
 const castFiles = ["electron/cast-network.mjs", "electron/cast-clients.mjs", "electron/cast-gateway.mjs", "electron/cast-service.mjs", "electron/cast-receiver/index.html", "electron/cast-receiver/receiver.js", "electron/cast-receiver/receiver.css", "electron/main.mjs", "electron/preload.cjs", "electron/torrent-service.mjs"];
@@ -20,7 +21,7 @@ const engineFiles = [
   "dbus-1.dll", "imageformats/qgif.dll", "imageformats/qico.dll", "imageformats/qjpeg.dll", "imageformats/qsvg.dll",
   "libcrypto-3-x64.dll", "libcurl.dll", "libssl-3-x64.dll", "platforms/qwindows.dll", "qt.conf",
   "Qt6Core.dll", "Qt6DBus.dll", "Qt6Gui.dll", "Qt6Network.dll", "Qt6Svg.dll", "Qt6Widgets.dll",
-  "styles/qmodernwindowsstyle.dll", "tls/qopensslbackend.dll", "transmission-daemon.exe", "zlib.dll",
+  "styles/qmodernwindowsstyle.dll", "tls/qopensslbackend.dll", "transmission-daemon.exe", "z.dll",
 ].map((file) => file.toLowerCase()).sort();
 
 async function sha256(filePath) {
@@ -51,11 +52,17 @@ if (await regularFile(asarPath, "app.asar")) {
     if (forbiddenRoots.some((prefix) => entry === prefix.slice(0, -1) || entry.startsWith(prefix))) errors.push(`entrée interdite dans app.asar : ${entry}`);
     if (/\.(?:env|key|log|mmdb|msi|part|pem|pfx|resume|torrent)$/iu.test(entry)) errors.push(`fichier sensible dans app.asar : ${entry}`);
   }
-  for (const required of ["dist/index.html", "electron/main.mjs", "electron/preload.cjs", "electron/library-preferences.mjs", "electron/library-preferences-schema.mjs", "electron/media-adapter.mjs", "electron/media-profile.mjs", "electron/subtitles.mjs", "public/slyorus.png", "public/slyorrent-logo.png", ...castFiles]) {
+  for (const required of ["dist/index.html", "electron/main.mjs", "electron/preload.cjs", "electron/transmission-manager.mjs", "electron/library-preferences.mjs", "electron/library-preferences-schema.mjs", "electron/library-destination.mjs", "electron/media-binaries.mjs", "electron/media-binary-path.mjs", "electron/media-adapter.mjs", "electron/media-profile.mjs", "electron/subtitles.mjs", "public/slyorus.png", "public/slyorrent-logo.png", ...castFiles]) {
     if (!entries.includes(required)) errors.push(`entrée requise absente de app.asar : ${required}`);
   }
-  for (const module of ["electron/library-preferences.mjs", "electron/library-preferences-schema.mjs", "electron/media-adapter.mjs", "electron/media-profile.mjs", "electron/subtitles.mjs", ...castFiles]) {
+  for (const module of ["electron/transmission-manager.mjs", "electron/library-preferences.mjs", "electron/library-preferences-schema.mjs", "electron/media-adapter.mjs", "electron/media-binary-path.mjs", "electron/media-binaries.mjs", "electron/library-destination.mjs", "electron/media-profile.mjs", "electron/subtitles.mjs", ...castFiles]) {
     if (entries.includes(module) && !extractFile(asarPath, path.join(...module.split("/"))).equals(await readFile(path.join(root, module)))) errors.push(`module de médiathèque périmé : ${module}`);
+  }
+  const frontendFiles = (await relativeFiles(path.join(root, "dist"))).map(file => `dist/${file}`).sort();
+  const packagedFrontend = entries.filter(entry => entry.startsWith("dist/") && /\.[^/]+$/u.test(entry)).sort();
+  if (JSON.stringify(frontendFiles) !== JSON.stringify(packagedFrontend)) errors.push("interface empaquetée différente du build courant");
+  for (const file of frontendFiles) {
+    if (entries.includes(file) && !extractFile(asarPath, path.join(...file.split("/"))).equals(await readFile(path.join(root, ...file.split("/"))))) errors.push(`interface périmée : ${file}`);
   }
   const packageDocument = JSON.parse(extractFile(asarPath, "package.json").toString("utf8"));
   if (packageDocument.version !== expectedPackage.version || packageDocument.productName !== "Slyorrent") errors.push("métadonnées de version invalides dans app.asar");
@@ -105,9 +112,12 @@ for (const relativeName of engineFiles) {
 }
 
 const binaryChecks = [
-  [path.join(root, "node_modules", "ffmpeg-static", "ffmpeg.exe"), path.join(resources, "app.asar.unpacked", "node_modules", "ffmpeg-static", "ffmpeg.exe"), "04e1307997530f9cf2fe35cba2ca7e8875ca91da02f89d6c7243df819c94ad00", "FFmpeg"],
-  [path.join(root, "node_modules", "@derhuerst", "ffprobe-static", "ffprobe.exe"), path.join(resources, "app.asar.unpacked", "node_modules", "@derhuerst", "ffprobe-static", "ffprobe.exe"), "3a7e2dc003dc2cd1472827e4c7c4f056ae1ae0ae7c5bbc580c99b49827351ba4", "FFprobe"],
+  [mediaPathsForApp(root).ffmpeg, mediaPathsForApp(asarPath).ffmpeg, MEDIA_SHA256.ffmpeg, "FFmpeg"],
+  [mediaPathsForApp(root).ffprobe, mediaPathsForApp(asarPath).ffprobe, MEDIA_SHA256.ffprobe, "FFprobe"],
 ];
+const mediaDirectory = path.dirname(mediaPathsForApp(asarPath).ffmpeg);
+const packagedMediaFiles = (await relativeFiles(mediaDirectory).catch(() => [])).sort();
+if (JSON.stringify(packagedMediaFiles) !== JSON.stringify(["LICENSE.txt", "README.txt", "ffmpeg.exe", "ffprobe.exe"].sort())) errors.push("la liste des moteurs média embarqués ne correspond pas à l’allowlist");
 for (const [source, packaged, expected, label] of binaryChecks) {
   if (await regularFile(source, `${label} source`) && await regularFile(packaged, `${label} embarqué`)) {
     if (await sha256(source) !== expected || await sha256(packaged) !== expected) errors.push(`${label} modifié ou inattendu`);

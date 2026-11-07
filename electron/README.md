@@ -4,7 +4,7 @@ Le processus principal Electron gère Transmission, les fichiers, les analyses e
 
 La fenêtre utilise le sandbox, `contextIsolation` et `webSecurity`, sans `nodeIntegration`. Les navigations externes, les nouvelles fenêtres et les webviews sont bloquées. Les demandes IPC sont limitées à la fenêtre principale.
 
-Transmission 4.1.3 démarre après vérification des empreintes de son exécutable et des DLL autorisées. Un fichier ajouté ou modifié bloque son lancement. Son API écoute sur `127.0.0.1`, avec des identifiants aléatoires et le contrôle de session Transmission.
+Transmission 4.1.4 démarre après vérification des empreintes de son exécutable et des DLL autorisées. Un fichier ajouté ou modifié bloque son lancement. Son API écoute sur `127.0.0.1`, avec des identifiants aléatoires et le contrôle de session Transmission. Le dossier installé conserve son ancien nom pour garder les règles de pare-feu existantes ; la version du binaire reste contrôlée.
 
 Les téléchargements arrivent dans la quarantaine du profil local. Le dossier final vient du sélecteur Windows et reste enregistré dans une politique de stockage. L’interface reçoit un jeton lié à sa fenêtre, pas la possibilité d’ouvrir un chemin arbitraire. La bibliothèque par défaut est `Documents/Slyorrent`.
 
@@ -12,7 +12,7 @@ Les téléchargements arrivent dans la quarantaine du profil local. Le dossier f
 
 Les URL `secutorrent-media://` sont temporaires et réservées à leur fenêtre. La lecture exige un fichier complet, validé, sous un chemin autorisé et avec une signature média reconnue. Sa taille et sa date de modification sont contrôlées avant ouverture. Révoquer un accès coupe aussi les flux ouverts.
 
-FFmpeg et FFprobe inspectent les pistes et préparent les copies compatibles H.264/AAC. Les pistes audio peuvent être sélectionnées et les sous-titres texte sont extraits en WebVTT. Les dialogues passent dans le lecteur sans charger de polices, de styles ASS ni de ressources externes. Les conversions sont mises en cache et analysées par Defender. Les versions et empreintes des moteurs sont dans `media-adapter.mjs` et [THIRD_PARTY_MEDIA.md](THIRD_PARTY_MEDIA.md).
+FFmpeg et FFprobe 9.0.2 inspectent les pistes et préparent les copies compatibles H.264/AAC. Les pistes audio peuvent être sélectionnées et les sous-titres texte sont extraits en WebVTT. Les dialogues passent dans le lecteur sans charger de polices, de styles ASS ni de ressources externes. Les conversions sont mises en cache et analysées par Defender. Les versions et empreintes des moteurs sont dans `media-binaries.mjs` et [THIRD_PARTY_MEDIA.md](THIRD_PARTY_MEDIA.md).
 
 Le journal `audit.jsonl` est chaîné par HMAC-SHA-256 et synchronisé sur disque. Il ne contient ni secrets, ni magnets, ni adresses de trackers. Il permet de détecter des modifications, mais pas de résister à un attaquant qui contrôle le compte Windows et la clé locale.
 

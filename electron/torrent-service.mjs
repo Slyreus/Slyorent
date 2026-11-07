@@ -7,6 +7,7 @@ import { locateSelfWithWindows } from "./local-location.mjs";
 import { assertSafeMagnetNetworkTargets, assertSafeTrackerUrls, inspectMagnet } from "./magnet-security.mjs";
 import { isMediaName, validateMediaSignature } from "./media-vault.mjs";
 import { PeerTelemetry } from "./peer-telemetry.mjs";
+import { assertLibraryPathBudget, libraryFolderName } from "./library-destination.mjs";
 
 const MAX_TORRENT_FILE_SIZE = 10 * 1024 * 1024;
 const MAX_FILES_PER_TORRENT = 10_000;
@@ -52,17 +53,6 @@ function samePath(left, right) {
     return process.platform === "win32" ? resolved.toLowerCase() : resolved;
   };
   return normalize(left) === normalize(right);
-}
-
-function safeFolderName(value) {
-  const cleaned = safeName(value, "Torrent")
-    .replace(/[<>:"/\\|?*]/g, " ")
-    .replace(/[. ]+$/u, "")
-    .replace(/\s{2,}/gu, " ")
-    .slice(0, 120)
-    .trim();
-  const candidate = cleaned || "Torrent";
-  return /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu.test(candidate) ? `_${candidate}` : candidate;
 }
 
 async function resolveSafeTorrentFile(allowedRoot, downloadDir, torrentFileName) {
@@ -1249,10 +1239,10 @@ export class TorrentService {
 
   async #prepareFinalDirectory(raw, plan) {
     const libraryRoot = await this.#canonicalLibraryRoot(plan.libraryRoot);
-    if (plan.createSubfolder !== true) return libraryRoot;
-    const baseName = safeFolderName(raw.name);
+    if (plan.createSubfolder !== true) { assertLibraryPathBudget(libraryRoot, raw.files || []); return libraryRoot; }
     for (let suffix = 1; suffix <= 1_000; suffix += 1) {
-      const candidate = path.join(libraryRoot, suffix === 1 ? baseName : `${baseName} (${suffix})`);
+      const folder = libraryFolderName({ root: libraryRoot, name: raw.name, hash: raw.hash_string, files: raw.files || [], suffix });
+      const candidate = path.join(libraryRoot, folder);
       if (!containsPath(libraryRoot, candidate)) throw new Error("Le sous-dossier calculé sort de la bibliothèque.");
       if (samePath(raw.download_dir, candidate)) return realpath(candidate);
       try {
@@ -1265,7 +1255,7 @@ export class TorrentService {
     throw Object.assign(new Error("Impossible de créer un sous-dossier libre dans la bibliothèque."), { code: "DESTINATION_EXHAUSTED" });
   }
 
-  async #waitForLocation(id, destination) {
+  async #waitForLocation(id, destination, previousError = "") {
     const deadline = Date.now() + this.#moveTimeoutMs;
     let raw = await this.#rawTorrent(id);
     while (Date.now() < deadline) {
@@ -1283,6 +1273,7 @@ export class TorrentService {
       }
       await new Promise((resolve) => setTimeout(resolve, this.#verificationPollMs));
       raw = await this.#rawTorrent(id);
+      if (raw.error_string && raw.error_string !== previousError) throw Object.assign(new Error(String(raw.error_string)), { code: "LIBRARY_MOVE_FAILED" });
     }
     throw Object.assign(new Error("Le déplacement vers la bibliothèque a dépassé le délai de sécurité."), { code: "MOVE_TIMEOUT" });
   }
@@ -1293,7 +1284,7 @@ export class TorrentService {
       await this.#manager.rpc.call("torrent_set_location", { ids: [Number(raw.id)], location: destination, move: true });
       await this.#audit.append("torrent.library_move_started", { torrentId: Number(raw.id), createSubfolder: plan.createSubfolder === true });
     }
-    const moved = await this.#waitForLocation(Number(raw.id), destination);
+    const moved = await this.#waitForLocation(Number(raw.id), destination, raw.error_string || "");
     await this.#audit.append("torrent.library_move_complete", { torrentId: Number(raw.id) });
     return moved;
   }

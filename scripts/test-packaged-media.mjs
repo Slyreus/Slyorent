@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import electron from "electron";
-import ffmpeg from "ffmpeg-static";
+import { ffmpegPath as ffmpeg } from "../electron/media-binaries.mjs";
 
 const execute = promisify(execFile);
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");

@@ -1,5 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { mediaPathsForApp } from "./media-binaries.mjs";
 
 const APPLICATION_DIRECTORY = fileURLToPath(new URL("../", import.meta.url));
 
@@ -16,6 +17,8 @@ export function resolveMediaBinaryPath(candidate, applicationDirectory = APPLICA
   const executable = path.resolve(candidate);
   const packaged = path.basename(application).toLowerCase() === "app.asar";
   const unpacked = `${application}.unpacked`;
+
+  if (Object.values(mediaPathsForApp(application)).includes(executable)) return executable;
 
   if (packaged && isInside(unpacked, executable)) return executable;
   if (!isInside(application, executable)) throw new Error("Le moteur média doit être fourni avec l'application.");
