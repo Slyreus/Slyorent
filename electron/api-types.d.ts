@@ -225,6 +225,10 @@ declare global {
   }
   interface SecuTorrentStatus {
     ready: boolean;
+    appVersion?: string;
+    electronVersion?: string;
+    chromiumVersion?: string;
+    mediaVersion?: string;
     state: "ready" | "starting" | "stopped";
     running: boolean;
     rpcReady: boolean;
@@ -251,6 +255,7 @@ declare global {
   interface Window {
     secuTorrent?: Readonly<{
       status(): Promise<SecuTorrentStatus>;
+      openReleasePage(): Promise<{ ok: true }>;
       list(): Promise<SecuTorrentTorrent[]>;
       globalSharing(): Promise<SecuTorrentGlobalSharing>;
       setGlobalSharing(options: SecuTorrentGlobalSharing): Promise<SecuTorrentGlobalSharingResult>;

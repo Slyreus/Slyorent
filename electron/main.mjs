@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { AuditLog } from "./audit-log.mjs";
 import { ContentRegistry } from "./content-registry.mjs";
 import { MediaAdapter } from "./media-adapter.mjs";
+import { MEDIA_VERSION } from "./media-binaries.mjs";
 import { MediaVault } from "./media-vault.mjs";
 import { LibraryPreferences } from "./library-preferences.mjs";
 import { createDefaultPeerTelemetry } from "./peer-telemetry.mjs";
@@ -18,6 +19,7 @@ import { CastService } from "./cast-service.mjs";
 
 const IPC_CHANNEL = "secutorrent:rpc";
 const PRODUCT_NAME = "Slyorrent";
+const RELEASE_PAGE = "https://github.com/Slyreus/Slyorent/releases/latest";
 const LEGACY_USER_DATA_DIRECTORY = "SecuTorrent Slyorus";
 const MAX_REQUESTS_PER_MINUTE = 600;
 const SHARING_MAINTENANCE_INTERVAL_MS = 60_000;
@@ -134,7 +136,17 @@ function registerIpc({ mainWindow, renderer, service, manager, audit, sharingHis
     return { ok: true };
   };
   const methods = new Map([
-    ["status", async () => manager.status()],
+    ["status", async () => ({
+      ...manager.status(),
+      appVersion: app.getVersion(),
+      electronVersion: process.versions.electron,
+      chromiumVersion: process.versions.chrome,
+      mediaVersion: MEDIA_VERSION,
+    })],
+    ["openReleasePage", async () => {
+      await shell.openExternal(RELEASE_PAGE);
+      return { ok: true };
+    }],
     ["list", async () => service.list()],
     ["globalSharing", async () => service.globalSharing()],
     ["setGlobalSharing", async (params) => service.setGlobalSharing(params)],

@@ -22,6 +22,8 @@ Pour le partage, tu peux définir des paramètres globaux, garder des limites pa
 
 L’onglet Protection détaille chaque alerte : le transfert concerné, la cause et le message du moteur. Un manque de place ou un chemin trop long se distingue d’un fichier signalé par l’antivirus. Les dossiers ajoutés par Slyorrent sont raccourcis quand c’est possible. Les chemins qui restent longs passent par le moteur de fichiers local, sans renommer les fichiers du torrent. Un contrôle en échec attend une relance manuelle.
 
+Protection affiche aussi la version installée. Le bouton Versions GitHub ouvre la dernière release dans ton navigateur.
+
 La carte P2P est un gadget. Les tirs bleus représentent l’envoi, les rouges la réception, avec une intensité liée au débit. Les pairs sont réels, leurs positions approximatives. Ce n’est pas le trajet exact des données.
 
 Les réglages, le suivi de lecture et les journaux restent sur le PC. Il n’y a pas de VPN fourni avec Slyorrent. Comme avec les autres clients torrent, les pairs et les trackers voient l’adresse IP utilisée. Un contrôle BitTorrent valide les pièces reçues, pas la sécurité du contenu, et un antivirus ne garantit pas qu’un fichier est sans risque. Utilise des contenus que tu as le droit de télécharger et de partager. [Données et réseau](PRIVACY.md) donne les détails.

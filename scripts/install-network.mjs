@@ -9,11 +9,11 @@ import { fileURLToPath } from "node:url";
 import yauzl from "yauzl";
 import { canonicalPathWithoutLinks } from "../electron/safe-path.mjs";
 import { trustedEngineFiles } from "../electron/transmission-manager.mjs";
-import { NETWORK_COMPONENTS, NETWORK_DLLS, NETWORK_ENGINE_DIRECTORY, NETWORK_BUILD_RUN } from "../electron/network-runtime.mjs";
+import { NETWORK_COMPONENTS, NETWORK_DLLS, NETWORK_ENGINE_DIRECTORY, NETWORK_BUILD_RUN, NETWORK_RELEASE_TAG } from "../electron/network-runtime.mjs";
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const runtime = path.join(repository, ".runtime");
-const downloads = path.join(runtime, "downloads");
+const downloads = path.join(runtime, "downloads", NETWORK_RELEASE_TAG);
 const source = path.join(runtime, "engine", "transmission-4.1.4", "PFiles", "Transmission");
 const patched = path.join(runtime, "engine", NETWORK_ENGINE_DIRECTORY);
 const sha256 = async file => createHash("sha256").update(await readFile(file)).digest("hex");
@@ -66,7 +66,7 @@ async function unpack(archive, target, names) {
   if (found.size !== names.length) throw new Error("Archive réseau incomplète.");
 }
 async function componentDirectory(component) {
-  const destination = path.join(runtime, "network", `${component.name}-${component.version}`);
+  const destination = path.join(runtime, "network", NETWORK_RELEASE_TAG, `${component.name}-${component.version}`);
   await privatePath(destination);
   if (await lstat(destination).catch(() => null)) {
     await verifyFiles(destination, component.files);
@@ -75,7 +75,7 @@ async function componentDirectory(component) {
   const archive = path.join(downloads, component.archive);
   await privatePath(archive);
   if (await sha256(archive).catch(() => "") !== component.sha256) {
-    const response = await fetch(`https://github.com/Slyreus/Slyorent/releases/download/v1.1.11/${component.archive}`);
+    const response = await fetch(`https://github.com/Slyreus/Slyorent/releases/download/${NETWORK_RELEASE_TAG}/${component.archive}`, { signal: AbortSignal.timeout(30_000) });
     if (response.status === 404 && process.env.CI === "true" && process.env.SLYORRENT_NETWORK_BOOTSTRAP_RUN === String(NETWORK_BUILD_RUN)) {
       await promisify(execFile)("gh", ["run", "download", String(NETWORK_BUILD_RUN), "--repo", "Slyreus/Slyorent", "--name", "Network-libraries-windows-x64", "--dir", downloads], { windowsHide: true });
     } else {

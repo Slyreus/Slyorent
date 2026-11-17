@@ -10,6 +10,7 @@ if ($uri.Scheme -ne 'https' -or $uri.Host -ne '127.0.0.1') { throw 'Ce controle 
 Add-Type -TypeDefinition @'
 using System;
 using System.IO;
+using System.Text;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 public static class SlyorrentTlsProbe {
@@ -23,6 +24,7 @@ public static class SlyorrentTlsProbe {
   [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int InitCall(int flags);
   [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int OptionCall(IntPtr handle, int option, IntPtr value);
   [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int PerformCall(IntPtr handle);
+  [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate UIntPtr WriteCall(IntPtr data, UIntPtr size, UIntPtr count, IntPtr userData);
   [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int InfoCall(IntPtr handle, int info, out int value);
   [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate void CleanupCall(IntPtr handle);
   [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate void GlobalCleanupCall();
@@ -54,21 +56,32 @@ public static class SlyorrentTlsProbe {
     var errorPtr=Marshal.AllocHGlobal(256);
     Marshal.Copy(new byte[256],0,errorPtr,256);
     var noProxy=Marshal.StringToHGlobalAnsi("");
+    var body=new MemoryStream();
+    WriteCall write=(data,size,count,userData)=>{
+      var length=size.ToUInt64()*count.ToUInt64();
+      if(length>1024 || body.Length+(long)length>1024) return UIntPtr.Zero;
+      var bytes=new byte[(int)length];
+      Marshal.Copy(data,bytes,0,bytes.Length);
+      body.Write(bytes,0,bytes.Length);
+      return new UIntPtr(length);
+    };
     try {
       var option=Function<OptionCall>(curl,"curl_easy_setopt");
-      var keys=new[]{10002,40309,10004,64,81,44,13,10010};
-      var values=new[]{urlPtr,blobPtr,noProxy,new IntPtr(1),new IntPtr(2),new IntPtr(1),new IntPtr(10),errorPtr};
+      var keys=new[]{10002,40309,10004,64,81,13,10010,10102,20011};
+      var values=new[]{urlPtr,blobPtr,noProxy,new IntPtr(1),new IntPtr(2),new IntPtr(10),errorPtr,noProxy,Marshal.GetFunctionPointerForDelegate(write)};
       for(int index=0;index<keys.Length;index++) {
         if(option(handle,keys[index],values[index])!=0) throw new Exception("Option TLS refusee");
       }
       var code=Function<PerformCall>(curl,"curl_easy_perform")(handle);
+      GC.KeepAlive(write);
       int status;
       Function<InfoCall>(curl,"curl_easy_getinfo")(handle,0x200002,out status);
-      return new { code, status, openssl=version, curl=curlVersion, error=Marshal.PtrToStringAnsi(errorPtr) };
+      return new { code, status, openssl=version, curl=curlVersion, body=Encoding.UTF8.GetString(body.ToArray()), error=Marshal.PtrToStringAnsi(errorPtr) };
     } finally {
       Function<CleanupCall>(curl,"curl_easy_cleanup")(handle);
       Function<GlobalCleanupCall>(curl,"curl_global_cleanup")();
       Marshal.FreeHGlobal(urlPtr); Marshal.FreeHGlobal(caPtr); Marshal.FreeHGlobal(blobPtr); Marshal.FreeHGlobal(errorPtr); Marshal.FreeHGlobal(noProxy);
+      body.Dispose();
     }
   }
 }

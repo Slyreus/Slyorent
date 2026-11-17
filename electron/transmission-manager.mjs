@@ -13,10 +13,7 @@ const ENGINE_RELATIVE_PATH = path.join(".runtime", "engine", NETWORK_ENGINE_DIRE
 const PACKAGED_ENGINE_RELATIVE_PATH = path.join(".runtime", "engine", "transmission-4.1.3", "PFiles", "Transmission", "transmission-daemon.exe");
 const STORAGE_POLICY_SCHEMA_VERSION = 1;
 const MAX_ALLOWED_DOWNLOAD_DIRECTORIES = 32;
-const EXPECTED_ENGINE_DLLS = Object.freeze({
-  ...NETWORK_DLLS,
-  "z.dll": "11d13bd3c0e711cb00f7de24ef2c9c8034b4c8a149c71f52f2ab05900d24cf5c",
-});
+const EXPECTED_ENGINE_DLLS = NETWORK_DLLS;
 
 export function trustedEngineFiles() {
   return Object.freeze({ "transmission-daemon.exe": EXPECTED_DAEMON_SHA256, ...EXPECTED_ENGINE_DLLS });

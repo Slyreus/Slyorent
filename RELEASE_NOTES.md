@@ -1,11 +1,7 @@
-Electron passe en 45.2.3, Transmission en 4.1.4 et FFmpeg/FFprobe en 9.0.2. OpenSSL passe en 3.5.9 et libcurl en 8.23.0, avec une compilation depuis leurs sources officielles et une attestation de provenance. Les DLL Qt inutilisées ont été retirées du moteur. L’audit npm ne signale plus de vulnérabilité, y compris dans les outils de développement.
+Electron passe en 45.3.3 avec les derniers correctifs de Chromium et de Node.js. Libcurl est recompilé avec zlib 1.4 pour les réponses compressées des trackers.
 
-Protection affiche maintenant chaque problème avec le nom du transfert, la cause et le détail du moteur. On peut ouvrir le transfert, consulter le journal ou relancer le contrôle depuis l’alerte. Un disque plein ou un problème de dossier n’est plus confondu avec une détection antivirus.
+La version installée et celles des composants sont visibles dans Protection. Le bouton Versions GitHub ouvre la page de téléchargement dans le navigateur.
 
-Les longs noms de torrents pouvaient bloquer le déplacement après téléchargement avec l’erreur Windows 206. Le dossier ajouté par Slyorrent est désormais raccourci quand c’est possible. Pour les chemins qui restent longs, le rangement passe par le moteur de fichiers local. Les originaux restent en quarantaine jusqu’à confirmation du nouvel emplacement. Les fichiers existants ne sont pas remplacés. Un contrôle en échec attend une relance manuelle au lieu de recommencer en boucle.
+Pour la mise à jour, ferme Slyorrent et lance `Slyorrent-Setup-1.1.12.exe`. Tes torrents, tes réglages et ta progression de lecture sont conservés.
 
-Les noms des fichiers restent intacts et le partage attend toujours la vérification et le scan Defender. La conversion HDR vers SDR conserve aussi les bonnes informations de couleur avec le nouveau moteur média.
-
-Pour la mise à jour, ferme Slyorrent et lance `Slyorrent-Setup-1.1.11.exe`. Les torrents, les réglages et le suivi restent en place. FFmpeg, FFprobe et Transmission sont inclus dans le setup.
-
-L’installateur n’est pas encore signé : Windows peut afficher « éditeur inconnu ». Les empreintes sont dans `SHA256SUMS.txt`. Seul le setup est nécessaire ; les autres archives servent à la compilation.
+Windows peut afficher « éditeur inconnu » car le setup n’est pas signé. Les empreintes sont dans `SHA256SUMS.txt`. Les autres archives servent à la compilation.

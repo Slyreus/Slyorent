@@ -17,6 +17,7 @@ async function invoke(method, params = {}) {
 
 const api = Object.freeze({
   status: () => invoke("status"),
+  openReleasePage: () => invoke("openReleasePage"),
   list: () => invoke("list"),
   globalSharing: () => invoke("globalSharing"),
   setGlobalSharing: (options) => invoke("setGlobalSharing", options),

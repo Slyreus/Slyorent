@@ -49,6 +49,7 @@ if (await regularFile(asarPath, "app.asar")) {
   for (const entry of entries) {
     if (forbiddenRoots.some((prefix) => entry === prefix.slice(0, -1) || entry.startsWith(prefix))) errors.push(`entrée interdite dans app.asar : ${entry}`);
     if (/\.(?:env|key|log|mmdb|msi|part|pem|pfx|resume|torrent)$/iu.test(entry)) errors.push(`fichier sensible dans app.asar : ${entry}`);
+    if (/(?:^|\/)node_modules\/picomatch(?:\/|$)/u.test(entry)) errors.push("picomatch doit rester réservé au build");
   }
   for (const required of ["dist/index.html", "electron/main.mjs", "electron/preload.cjs", "electron/transmission-manager.mjs", "electron/library-preferences.mjs", "electron/library-preferences-schema.mjs", "electron/library-destination.mjs", "electron/library-file-move.mjs", "electron/media-binaries.mjs", "electron/media-binary-path.mjs", "electron/media-adapter.mjs", "electron/media-profile.mjs", "electron/subtitles.mjs", "public/slyorus.png", "public/slyorrent-logo.png", ...runtimeFiles]) {
     if (!entries.includes(required)) errors.push(`entrée requise absente de app.asar : ${required}`);
