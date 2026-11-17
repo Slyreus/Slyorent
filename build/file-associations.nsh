@@ -1,4 +1,8 @@
 !macro customInstall
+  ; libcurl intègre zlib depuis la 1.1.12.
+  IfFileExists "$INSTDIR\resources\.runtime\engine\transmission-4.1.3\PFiles\Transmission\z.dll" 0 +2
+  Delete "$INSTDIR\resources\.runtime\engine\transmission-4.1.3\PFiles\Transmission\z.dll"
+
   ; Proposer Slyorrent dans « Ouvrir avec » sans modifier le choix par défaut.
   WriteRegStr HKCU "Software\Classes\Slyorrent.Torrent" "" "Fichier BitTorrent"
   WriteRegStr HKCU "Software\Classes\Slyorrent.Torrent" "FriendlyTypeName" "Fichier BitTorrent"

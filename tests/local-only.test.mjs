@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
+import { trustedEngineFiles } from "../electron/transmission-manager.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const guardPath = path.join(repositoryRoot, "scripts", "assert-local-only.mjs");
@@ -88,8 +89,15 @@ test("l'installation du moteur reste locale et vérifie version, hash et signatu
   assert.match(installer, /'\/a'/u);
   assert.match(installer, /Assert-PathInsideRuntime\s+-Path\s+\$EngineRoot/u);
   assert.doesNotMatch(installer, /winget\s+install/iu);
-  assert.match(manager, /EXPECTED_DAEMON_SHA256\s*=\s*"[a-f0-9]{64}"/u);
-  assert.match(manager, /EXPECTED_ENGINE_DLLS\s*=\s*Object\.freeze/u);
+  const files = trustedEngineFiles();
+  assert.ok(Object.isFrozen(files));
+  assert.deepEqual(Object.keys(files).sort(), [
+    "libcrypto-3-x64.dll",
+    "libcurl.dll",
+    "libssl-3-x64.dll",
+    "transmission-daemon.exe",
+  ]);
+  for (const digest of Object.values(files)) assert.match(digest, /^[a-f0-9]{64}$/u);
   assert.match(manager, /actual\.length\s*!==\s*expected\.length/u);
   assert.match(manager, /await\s+verifyEngineDlls\(path\.dirname\(resolved\)\)/u);
 });
